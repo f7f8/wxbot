@@ -8,8 +8,13 @@ var entryUrl2 = 'https://www.google.com/';
 var tick = 0;
 var qr = '';
 var jar = request.jar()
-var wxBaseUrl = '';
+var wxBaseUrl = null;
 var context = {};
+
+var wxUrl = function(subdomain, path) {
+  return wxBaseUrl.protocol + '//' +
+    (subdomain ? subdomain + '.' : '') + wxBaseUrl.hostname + path;
+};
 
 var GET = function(url, headers, qs, callback) {
   var options = {
@@ -230,7 +235,7 @@ var getDeviceId = function() {
 };
 
 var wxInit = function(uin, sid, callback) {
-  var url = wxBaseUrl + '/cgi-bin/mmwebwx-bin/webwxinit';
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxinit');
   var qs = {
     r: ~new Date
   };
@@ -268,7 +273,7 @@ var wxInit = function(uin, sid, callback) {
 };
 
 var wxStatusNotify = function(callback) {
-  var url = wxBaseUrl + '/cgi-bin/mmwebwx-bin/webwxstatusnotify';
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxstatusnotify');
   var qs = {
     r: ~new Date
   };
@@ -302,17 +307,21 @@ var wxStatusNotify = function(callback) {
   });
 };
 
-var syncCheck = function(qrCode, callback) {
-  var url = 'https://webpush.wx.qq.com/cgi-bin/mmwebwx-bin/synccheck';
+var getFormateSyncKey = function(keys) {
+  for (var e = keys.List, t = [], o = 0, n = e.length; n > o; o++)
+  t.push(e[o].Key + "_" + e[o].Val);
+  return t.join("|")
+};
+
+var syncCheck = function(callback) {
+  var url = wxUrl('webpush', '/cgi-bin/mmwebwx-bin/synccheck');
   var qs = {
     r: (new Date()).getTime(),
     skey: context.SKey,
     sid: context.sid,
     uin: context.uin,
     deviceid: getDeviceId(),
-    loginicon: true,
-    uuid: qrCode,
-    tip: 1,
+    synckey: getFormateSyncKey(context.SyncKey),
     _: tick
   };
 
@@ -320,52 +329,107 @@ var syncCheck = function(qrCode, callback) {
     Accept: '*/*'
   };
 
-  url = 'https://login.wx.qq.com/cgi-bin/mmwebwx-bin/login?loginicon=true&';
-  url += 'uuid=' + qrCode + '&tip=0&';
-  url += 'r=' + ~new Date + '&';
-  url += '_=' + tick;
+  console.log('心跳同步检测'); 
 
-  return GET(url, headers, null, function(err, data) {
+  return GET(url, headers, qs, function(err, data) {
     if (err) {
       return callback(err);
     };
 
-    var re = /window\.code\=([0-9]+);/;
-    var code = data.match(re)[1];
+    tick += 1;
+    var re = /\{retcode\:\"([0-9]+)\",selector\:\"([0-9]+)\"}/;
+    var result = {
+      retcode: parseInt(data.match(re)[1]),
+      selector: parseInt(data.match(re)[2])
+    };
 
-    if (code == '201') {
-      console.log('已经扫码，等待确认...');
-    } else if (code == '200') {
-      re = /window\.redirect_uri\=\"(.+)\";$/;
-      var redirUrl = data.match(re)[1];
-      console.log('登录跳转: ' + redirUrl);
-      return callback(null, redirUrl);
-    } else {
-      console.log('等待扫码，状态: ' + code);
-    }
+    return callback(null, result);
+  });
+};
 
-    return callback(null, null);
+var webSync = function(callback) {
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxsync');
+  var qs = {
+    sid: context.sid,
+    skey: context.SKey
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.uin,
+      Sid: context.sid,
+      Skey: context.SKey,
+      DeviceID: getDeviceId()
+    },
+    SyncKey: context.SyncKey,
+    rr: ~new Date
+  };
+
+  console.log('Web同步...');
+  
+  return POST(url, headers, qs, body, function(err, data) {
+    if (err) {
+      return callback(err);
+    };
+
+    console.log(JSON.stringify(data, null, 2));
+    return callback(null, data);
   });
 
 };
 
-var mainProc = function(entry) {
-  var entryUrl = url.parse(entry);
-  wxBaseUrl = entryUrl.protocol + '//' + entryUrl.hostname;
+var syncUpdate = function(callback) {
+  syncCheck(function(err, data) {
+    if (err) return callback(err);
+    console.log(JSON.stringify(data, null, 2));
 
-  console.log(wxBaseUrl);
+    if (data.selector > 0) {
+      return webSync(function(err, data) {
+        context.SyncKey = data.SyncKey;
+        return callback();
+      });
+    }
+
+    return callback(null, data);
+  });
+};
+
+var aiUpdate = function(callback) {
+  return callback();
+};
+
+var loopProc = function(callback) {
+  async.series([syncUpdate, aiUpdate], function(err, result) {
+    if (err) return callback(err);
+    return callback(null, result);
+  });
+};
+
+var mainProc = function(entry) {
+  wxBaseUrl = url.parse(entry);
+
+  console.log(wxUrl(null, ''));
 
   var doInit = async.compose(wxStatusNotify, wxInit, loginRedirect);
   doInit(entry, function(err, result) {
     if (err) {
       return console.log(err);
     };
-
-    console.log(JSON.stringify(result, null, 2));
     
     setTimeout(function() {
       var callee = arguments.callee;
-      setTimeout(callee, 1000);
+      loopProc(function(err) {
+        if (err) {
+          return console.log(err);
+        }
+        
+        setTimeout(callee, 1000);
+      });
     }, 1000);
   });
 };
