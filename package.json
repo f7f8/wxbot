@@ -1,0 +1,30 @@
+{
+  "name": "wxbot",
+  "version": "0.0.1",
+  "description": "微信增强助手",
+  "main": "app.js",
+  "scripts": {
+    "test": "make test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sudochmod777/wxbot.git"
+  },
+  "keywords": [
+    "WeiXin",
+    "Helper",
+    "Bot"
+  ],
+  "author": "dashixiong@gmail.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/sudochmod777/wxbot/issues"
+  },
+  "homepage": "https://github.com/sudochmod777/wxbot#readme",
+  "dependencies": {
+    "async": "^2.0.0-rc.6",
+    "fs": "0.0.2",
+    "moment": "^2.14.1",
+    "request": "^2.72.0"
+  }
+}
