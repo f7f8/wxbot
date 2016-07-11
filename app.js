@@ -2,6 +2,7 @@ var request = require('request');
 var async = require('async');
 var fs = require('fs');
 const url = require('url');
+var parser = require('xml2json');
 
 var entryUrl = 'https://web.weixin.qq.com/';
 var entryUrl2 = 'https://www.google.com/';
@@ -10,10 +11,23 @@ var qr = '';
 var jar = request.jar()
 var wxBaseUrl = null;
 var context = {};
+var secondary = '';
 
 var wxUrl = function(subdomain, path) {
   return wxBaseUrl.protocol + '//' +
     (subdomain ? subdomain + '.' : '') + wxBaseUrl.hostname + path;
+};
+
+var htmlDecode = function(e) {
+    return e && 0 != e.length ? e.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&") : "";
+};
+
+var dumpContext = function() {
+    fs.writeFileSync(
+      'log/context.json',
+      JSON.stringify(context, null, 2),
+      'utf8'
+    );
 };
 
 var GET = function(url, headers, qs, callback) {
@@ -99,7 +113,7 @@ var getAppUrl = function(url, callback) {
 
     var re = /(https:\/\/res.wx.qq.com\/zh_CN\/htmledition\/v2\/js\/webwx.*\.js)/;
     var appUrl = data.match(re)[1];
-    console.log('成功获取 appUrl: ' + appUrl);
+    console.log('<sys> 成功获取 appUrl: ' + appUrl);
     return callback(null, appUrl);
   });
 };
@@ -112,7 +126,7 @@ var getAppId = function(url, callback) {
 
     var re = /jslogin\?appid\=(wx[0-9a-z]+)\&/;
     var appId = data.match(re)[1];
-    console.log('成功获取 appId: ' + appId);
+    console.log('<sys> 成功获取 appId: ' + appId);
     return callback(null, appId);
   });
 };
@@ -134,7 +148,7 @@ var getQREntry = function(appId, callback) {
 
     var re = /window\.QRLogin\.uuid\s\=\s\"(.*)\";$/;
     var qrCode = data.match(re)[1];
-    console.log('成功获取二维码识别号: ' + qrCode);
+    console.log('<sys> 成功获取二维码识别号: ' + qrCode);
     qr = qrCode;
     return callback(null, qrCode);
   });
@@ -155,9 +169,9 @@ var getQRImage = function(entryCode, callback) {
     }
   };
 
-  var filename = 'qrs/' + (new Date()).getTime() + '.jpg';
+  var filename = 'qrs/login.jpg';
   request(options).pipe(fs.createWriteStream(filename));
-  console.log('二维码图片 -> ' + filename);
+  console.log('<sys> 二维码图片 -> ' + filename);
   return callback(null, filename);
 };
 
@@ -189,19 +203,44 @@ var getLoginResult = function(qrCode, callback) {
     var code = data.match(re)[1];
 
     if (code == '201') {
-      console.log('已经扫码，等待确认...');
+      console.log('<sys> 已经扫码，等待确认...');
     } else if (code == '200') {
       re = /window\.redirect_uri\=\"(.+)\";$/;
       var redirUrl = data.match(re)[1];
-      console.log('登录跳转: ' + redirUrl);
+      console.log('<sys> 登录跳转: ' + redirUrl);
       return callback(null, redirUrl);
     } else {
-      console.log('等待扫码，状态: ' + code);
+      console.log('<sys> 等待扫码，状态: ' + code);
     }
 
     return callback(null, null);
   });
 
+};
+
+var wxGetContacts = function(callback) {
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxgetcontact');
+  var qs = {
+    r: (new Date()).getTime(),
+    seq: 0,
+    skey: context.SKey
+  };
+
+  var headers = {
+    Accept: 'application/json, text/plain, */*'
+  };
+
+  return GET(url, headers, qs, function(err, data) {
+    if (err) {
+      return callback(err);
+    };
+
+    var jsr = JSON.parse(data);
+    var fmtjsr = JSON.stringify(jsr, null, 2);
+    fs.writeFileSync('contacts.json', fmtjsr, 'utf8');
+    printContacts(jsr.MemberList);
+    return callback(null, jsr);
+  });
 };
 
 var getCookie = function (cookies, e) {
@@ -216,22 +255,39 @@ var getCookie = function (cookies, e) {
 };
 
 var loginRedirect = function(url, callback) {
-  return GET(url, null, null, function(err, data) {
+  var v2Url = url + '&fun=new&version=v2';
+  var headers = {
+    Accept: 'application/json, text/plain, */*'
+  };
+
+  return GET(v2Url, headers, null, function(err, data) {
     if (err) {
       return callback(err);
-    };
+    }
+   
+    var r = parser.toJson(data, {object: true});
+    console.log(JSON.stringify(r, null, 2));
+
+    context.passTicket = r.error.pass_ticket;
 
     var cookies = jar.getCookieString(url);
     return callback(
       null,
-      getCookie(cookies, 'wxuin'),
-      getCookie(cookies, 'wxsid')
+      r.error.wxuin,
+      r.error.wxsid
     );
   });
 };
 
 var getDeviceId = function() {
       return "e" + ("" + Math.random().toFixed(15)).substring(2, 17);
+};
+
+var printContacts = function(contacts) {
+  for (var i in contacts) {
+    var c = contacts[i];
+    console.log('+++ ' + c.UserName + ' ' + c.NickName + ' (' + c.Alias + ')');
+  }
 };
 
 var wxInit = function(uin, sid, callback) {
@@ -254,7 +310,7 @@ var wxInit = function(uin, sid, callback) {
     }
   };
 
-  console.log('获取用户资料...');
+  console.log('<sys> 获取用户资料...');
   
   return POST(url, headers, qs, body, function(err, data) {
     if (err) {
@@ -267,7 +323,11 @@ var wxInit = function(uin, sid, callback) {
     context.SKey = data.SKey;
     context.SyncKey = data.SyncKey;
 
-    console.log(JSON.stringify(data, null, 2));
+    dumpContext();
+    //console.log(JSON.stringify(data, null, 2));
+
+    console.log('Passticket: ' + data.Passticket);
+    printContacts(data.ContactList);
     return callback();
   });
 };
@@ -296,15 +356,117 @@ var wxStatusNotify = function(callback) {
     ToUserName: context.User.UserName
   };
 
-  console.log('变更用户在线状态...');
+  console.log('<sys> 切换为在线状态...');
   
   return POST(url, headers, qs, body, function(err, data) {
     if (err) {
       return callback(err);
     };
 
-    return callback(null, data);
+    return callback();
   });
+};
+
+var wxVerifyUser = function(recommendInfo, callback) {
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxverifyuser');
+  var qs = {
+    r: ~new Date
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.uin,
+      Sid: context.sid,
+      Skey: context.SKey,
+      DeviceID: getDeviceId()
+    },
+    Opcode: 3,
+    VerifyUserListSize: 1,
+    VerifyUserList: [
+      {
+        Value: recommendInfo.UserName,
+        VerifyUserTicket: recommendInfo.Ticket
+      }
+    ],
+    VerifyContent: "",
+    SceneListCount: 1,
+    SceneList: [
+      33
+    ],
+    skey: context.SKey
+  };
+
+  console.log('<sys> 接受 ' + recommendInfo.NickName + ' 的添加好友邀请...');
+  
+  return POST(url, headers, qs, body, callback);
+};
+
+var wxCreateChatRoom = function(topic, members, callback) {
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxcreatechatroom');
+  var qs = {
+    r: (new Date()).getTime()
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.uin,
+      Sid: context.sid,
+      Skey: context.SKey,
+      DeviceID: getDeviceId()
+    },
+    Topic: topic,
+    MemberCount: members.length,
+    MemberList: [],
+  };
+
+  for (var i in members) {
+    body.MemberList.push({UserName: members[i]});
+  }
+
+  console.log('<sys> 创建新群 <' + topic + '>');
+  
+  return POST(url, headers, qs, body, callback);
+};
+
+var wxSendMsg = function(receiver, content, callback) {
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxsendmsg');
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var msgId = (new Date()).getTime() + '' + Math.random().toFixed(3).replace(".", "");
+
+  var body = {
+    BaseRequest: {
+      Uin: context.uin,
+      Sid: context.sid,
+      Skey: context.SKey,
+      DeviceID: getDeviceId()
+    },
+    Msg: {
+        Type: 1,
+        Content: content,
+        FromUserName: context.User.UserName,
+        ToUserName: receiver,
+        LocalID: msgId,
+        ClientMsgId: msgId
+    },
+    Scene: 0
+  };
+
+  return POST(url, headers, null, body, callback);
 };
 
 var getFormateSyncKey = function(keys) {
@@ -329,7 +491,7 @@ var syncCheck = function(callback) {
     Accept: '*/*'
   };
 
-  console.log('心跳同步检测'); 
+  console.log('<sys> 心跳同步检测'); 
 
   return GET(url, headers, qs, function(err, data) {
     if (err) {
@@ -370,41 +532,108 @@ var webSync = function(callback) {
     rr: ~new Date
   };
 
-  console.log('Web同步...');
+  console.log('<sys> Web接口同步...');
   
   return POST(url, headers, qs, body, function(err, data) {
     if (err) {
       return callback(err);
     };
 
-    console.log(JSON.stringify(data, null, 2));
+    //console.log(JSON.stringify(data, null, 2));
     return callback(null, data);
   });
 
+};
+
+var apiCreateQun = function(code, callback) {
+  callback(null, {
+    "qunid": "8888",
+    "name": "水泊梁山",
+    "url": "http://yunmof.com/weiqun/MTAwMTEx"
+  });
+};
+
+var onStrangerInviting = function(msg, callback) {
+  wxVerifyUser(msg.RecommendInfo, function(err, result) {
+    console.log(result);
+
+    return callback();
+  });
+};
+
+var onCreateQun = function(code, members, callback) {
+  apiCreateQun(code, function(err, result) {
+    wxCreateChatRoom(result.name, members, function(err, result) {
+      console.log(result);
+      return wxSendMsg(
+        result.ChatRoomName,
+        '付费群“' + result.Topic + '”创建成功！回复“我要提现”可将群收入提现至微信钱包！',
+        callback
+      );
+    });
+  });
+};
+
+var processMsg = function(msg, callback) {
+  console.log('---------------------------------------------------');
+  console.log('> ' + msg.MsgType);
+  console.log('> ' + msg.FromUserName + ": " + htmlDecode(msg.Content));
+  console.log('---------------------------------------------------');
+  console.log('');
+
+  if (msg.FromUserName == 'fmessage') {
+    return onStrangerInviting(msg, callback);
+  } else if (msg.MsgType == 10000) {
+    if (msg.Content.indexOf('你已添加了') >= 0) {
+      return wxSendMsg(msg.FromUserName, "[抱拳] 欢迎使用呱呱群管家，请回复群编号/群口令继续完成建群操作！", callback);
+    }
+  } else if (msg.MsgType == 1) {
+    var cmd = msg.Content;
+    if (cmd.indexOf('JQ') == 0) {
+      var members = [
+        msg.FromUserName,
+        secondary
+      ];
+      return onCreateQun(cmd.substr(2), members, callback);
+    }
+  }
+
+  return callback();
 };
 
 var syncUpdate = function(callback) {
   syncCheck(function(err, data) {
     if (err) return callback(err);
-    console.log(JSON.stringify(data, null, 2));
-
-    if (data.selector > 0) {
-      return webSync(function(err, data) {
-        context.SyncKey = data.SyncKey;
-        return callback();
-      });
+    
+    if (data.retcode == 0) {
+      if (data.selector > 0) {
+        console.log('<sys> 有 ' + data.selector + ' 条新消息！')
+        return webSync(function(err, data) {
+          return callback(null, data);
+        });
+      }
+      
+      return callback(null, null);
     }
-
-    return callback(null, data);
+    return callback(new Error('<sys> 心跳同步中断'));
   });
 };
 
-var aiUpdate = function(callback) {
-  return callback();
+var aiUpdate = function(data, callback) {
+  if (data == null)
+    return callback();
+
+  context.SyncKey = data.SyncKey;
+  fs.writeFileSync('log/' + (new Date()).getTime() + '.log', JSON.stringify(data, null, 2), 'utf8');
+
+  async.each(data.AddMsgList, processMsg, function(err) {
+    if (err) return callback(err);
+    return callback();
+  });
 };
 
 var loopProc = function(callback) {
-  async.series([syncUpdate, aiUpdate], function(err, result) {
+  async.waterfall([syncUpdate, aiUpdate], function(err, result) {
     if (err) return callback(err);
     return callback(null, result);
   });
@@ -413,21 +642,27 @@ var loopProc = function(callback) {
 var mainProc = function(entry) {
   wxBaseUrl = url.parse(entry);
 
-  console.log(wxUrl(null, ''));
-
-  var doInit = async.compose(wxStatusNotify, wxInit, loginRedirect);
+  var doInit = async.compose(wxGetContacts, wxStatusNotify, wxInit, loginRedirect);
   doInit(entry, function(err, result) {
     if (err) {
       return console.log(err);
     };
-    
+
+    var members = result.MemberList;
+    for (var i in members) {
+      if (members[i].Alias == 'bailuxitian') {
+        secondary = members[i].UserName
+      }
+    }
+
     setTimeout(function() {
       var callee = arguments.callee;
       loopProc(function(err) {
         if (err) {
-          return console.log(err);
+          console.log(err);
+          return console.log('<sys> 应用退出');
         }
-        
+
         setTimeout(callee, 1000);
       });
     }, 1000);
@@ -441,17 +676,17 @@ doLogin(entryUrl, function(err, result) {
     return console.log(err);
   };
 
-  console.log('请扫码 ' + result + ' 登录');
+  console.log('<sys> 请扫码 ' + result + ' 登录');
 
   tick = (new Date()).getTime();
   setTimeout(function() {
     var callee = arguments.callee;
-    
+
     getLoginResult(qr, function(err, data) {
       if (err) {
         return console.log(err);
       };
-      
+
       if (data == null) {
         tick += 1;
         return setTimeout(callee, 1000);
