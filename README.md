@@ -8,11 +8,13 @@
 ## 支持的应用场景
 ### 微信群自动管理
 
-![商户资料及支付设置](https://www.websequencediagrams.com/cgi-bin/cdraw?lz=566h55CG5ZGYLT4r5LqR5ZWG5Z-OOiDllYbmiLforr7nva4KAA8JLT4AFwyvvOWFpeaUr-S7mAAXEitIaVBPU-S6kTog5pu05pawAEsHtYTmlpkKABUILS0-LQBrCzw86L-U5ZuePj4ALh0AZw0AHywtPi0AgWcJOiA8POWujOaIkD4-&s=earth)
+![群主建群](https://www.websequencediagrams.com/cgi-bin/cdraw?lz=576k5Li7LT4r5ZGx5ZGx576k566h5a62OiDnlLPor7flu7rnvqQKAA8PLS0-LQA0BjogPDzliqnmiYvkuoznu7TnoIHlkoznvqTnvJblj7c-PgoAWQnnvqQAJAY6IOWKoOWlveWPiwoADAkARwzpqozor4HpgJrov4cAKxXmj5DkvpsAXQkAOwsAgTYTAEgGACMKAIE2FgCBEwjnvqTkv6Hmga_vvIhJRCwg5ZCN56ew77yM5o6o6ZO-77yJAGIMAIFIDACCJQXmi4kAgk0GAIFEFgAeB4iQ5Yqf77yBCg&s=earth)
+
+![群员入群](https://www.websequencediagrams.com/cgi-bin/cdraw?lz=576k5ZGYLT4r576k5Yqp5omLOiDliqDlpb3lj4sKAAwJLS0-LQAlBjog6aqM6K-B6YCa6L-HAB0FADAQ5o-Q5L6b5Luk54mMADgLPivlkbHlkbHnvqTnrqHlrrYAQwjnvqQAJgcAEg8AbggAgREH576k5L-h5oGv5LiO5oiQ5ZGYSUQAVAwAdwyLieS6uuWFpee-pAAMF-eUqAA9COi_m-ihjOWkh-azqACBXhYARAbmiJDlip_vvIEK&s=earth)
 
 ### 微信智能客服
 
-![门店增加POS机](https://www.websequencediagrams.com/cgi-bin/cdraw?lz=566h55CG5ZGYLT4r5LqR5ZWG5Z-OOiDlop7liqBQT1PmnLoKAA8JLT4AGAvnoa7lrprpl6jlupcAFwwrSGlQT1PkupE6IOivt-axguiuvuWkh-aOiOadg-eggQoAGAgtLT4tAGgLPDzov5Tlm54-Pgpsb29wIOetieW-heWbnuiwgwogICAgAHAXABsMZW5kAFUKAIFEDVtjYWxsYmFja10AgQMM5oiQ5Yqf6YCa55-lAIFcCy0-LQCBOwoAgQ0LABUNAIIxCTogPDwAgiQMAE8GPj4&s=earth)
+![null]()
 
 ## 接口返回错误信息格式
 >
@@ -51,6 +53,8 @@
 // 建群成功
 {
     "qun_create_response": {
+        "qunid": "8888",
+        "name": "水泊梁山",
         "url": "http://yunmof.com/weiqun/MTAwMTEx"
     }
 }
@@ -69,7 +73,6 @@
 | :------------ | :-------- | :---------------- | :---- | :---------------------------------------- |
 | token         | string    | 入群令牌          | 是    | NTkxNjkwNzE4RDY2                          |
 | nickname      | string    | 群员昵称          | 是    | 黑旋风                                    |
-| remarkname    | string    | 群员备注          | 是    | 8888-001                                  |
 
 返回结果：
 >
@@ -77,7 +80,9 @@
 // 入群成功
 {
     "membership_join_response": {
-        "approved": "ok"
+        "qunid": "8888",
+        "name": "水泊梁山",
+        "memberid": "8888-001"
     }
 }
 ```
