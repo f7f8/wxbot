@@ -241,12 +241,63 @@ var wxGetContacts = function(callback) {
     var members = jsr.MemberList;
     for (var i in members) {
       _C[members[i].UserName] = members[i];
+      if (members[i].NickName == '王政娇') {
+        secondary = members[i].UserName
+      }
     }
 
     var fmtjsr = JSON.stringify(jsr, null, 2);
     fs.writeFileSync('contacts.json', fmtjsr, 'utf8');
     printContacts(jsr.MemberList);
-    return callback(null, jsr);
+    return callback();
+  });
+};
+
+var wxBatchGetContact = function(list, type, callback) {
+  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxbatchgetcontact');
+  var qs = {
+    type: type,
+    r: (new Date()).getTime()
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.uin,
+      Sid: context.sid,
+      Skey: context.SKey,
+      DeviceID: getDeviceId()
+    },
+    Count: list.length,
+    List: [],
+  };
+
+  for (var i in list) {
+    body.List.push({UserName: list[i], EncryChatRoomId: ''});
+  }
+
+  console.log('<sys> 批量获取联系人资料，共 ' + list.length + ' 人 ...');
+  
+  return POST(url, headers, qs, body, callback);
+
+};
+
+var updateChatSet = function(callback) {
+  wxBatchGetContact(context.ChatSet, 'ex', function(err, result) {
+    if (err) return callback(err);
+
+    var list = result.ContactList;
+    for (var i in list) {
+      _C[list[i].UserName] = list[i];
+    }
+
+    var js = JSON.stringify(result, null, 2);
+    fs.writeFileSync('chatset.json', js, 'utf8');
+    return callback();
   });
 };
 
@@ -329,13 +380,12 @@ var wxInit = function(uin, sid, callback) {
     context.User = data.User;
     context.SKey = data.SKey;
     context.SyncKey = data.SyncKey;
+    context.ChatSet = data.ChatSet.split(',');
 
     dumpContext();
-    //console.log(JSON.stringify(data, null, 2));
 
-    console.log('Passticket: ' + data.Passticket);
     printContacts(data.ContactList);
-    return callback();
+    return callback(null);
   });
 };
 
@@ -703,18 +753,11 @@ var loopProc = function(callback) {
 var mainProc = function(entry) {
   wxBaseUrl = url.parse(entry);
 
-  var doInit = async.compose(wxGetContacts, wxStatusNotify, wxInit, loginRedirect);
+  var doInit = async.compose(updateChatSet, wxGetContacts, wxStatusNotify, wxInit, loginRedirect);
   doInit(entry, function(err, result) {
     if (err) {
       return console.log(err);
     };
-
-    var members = result.MemberList;
-    for (var i in members) {
-      if (members[i].NickName == '王政娇') {
-        secondary = members[i].UserName
-      }
-    }
 
     setTimeout(function() {
       var callee = arguments.callee;
