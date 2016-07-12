@@ -12,6 +12,8 @@ var jar = request.jar()
 var wxBaseUrl = null;
 var context = {};
 var secondary = '';
+var _C = {};
+var _R = {};
 
 var wxUrl = function(subdomain, path) {
   return wxBaseUrl.protocol + '//' +
@@ -236,6 +238,11 @@ var wxGetContacts = function(callback) {
     };
 
     var jsr = JSON.parse(data);
+    var members = jsr.MemberList;
+    for (var i in members) {
+      _C[members[i].UserName] = members[i];
+    }
+
     var fmtjsr = JSON.stringify(jsr, null, 2);
     fs.writeFileSync('contacts.json', fmtjsr, 'utf8');
     printContacts(jsr.MemberList);
@@ -545,11 +552,35 @@ var webSync = function(callback) {
 
 };
 
-var apiCreateQun = function(code, callback) {
-  callback(null, {
-    "qunid": "8888",
-    "name": "水泊梁山",
-    "url": "http://yunmof.com/weiqun/MTAwMTEx"
+var apiCreateQun = function(code, owner, assistant, callback) {
+  var url = 'http://qun.test.yunmof.com/wxbot/qun';
+  var body = {
+    code: code,
+    owner: owner,
+    assistant: assistant
+  };
+
+  POST(url, null, null, body, function(err, data) {
+    if (err) return callback(err);
+
+    return callback(null, JSON.parse(data));
+  });
+};
+
+var apiJoinQun = function(token, nickname, callback) {
+  var url = 'http://qun.test.yunmof.com/wxbot/qun/membership';
+  var body = {
+    token: token,
+    nickname: nickname
+  };
+
+  POST(url, null, null, body, function(err, data) {
+    if (err) return callback(err);
+
+    var result = JSON.parse(data);
+    if (result.error) return callback(result.err);
+
+    return callback(null, result.membership_join_response);
   });
 };
 
@@ -562,15 +593,43 @@ var onStrangerInviting = function(msg, callback) {
 };
 
 var onCreateQun = function(code, members, callback) {
-  apiCreateQun(code, function(err, result) {
-    wxCreateChatRoom(result.name, members, function(err, result) {
-      console.log(result);
-      return wxSendMsg(
-        result.ChatRoomName,
-        '付费群“' + result.Topic + '”创建成功！回复“我要提现”可将群收入提现至微信钱包！',
-        callback
-      );
-    });
+  apiCreateQun(code, _C[members[0]].NickName, context.User.UserName, function(err, result) {
+    if (result) {
+      var qunName = result.qun_create_response.name;
+      var url = result.qun_create_response.url;
+      var qunid = result.qun_create_response.qunid;
+
+      wxCreateChatRoom(qunName, members, function(err, result) {
+        console.log(result);
+
+        _R[qunid] = {name: qunName, url: url};
+        return wxSendMsg(
+          result.ChatRoomName,
+          '付费群“' + result.Topic + '”创建成功！回复“我要提现”可将群收入提现至微信钱包！\n\n' + url,
+          callback
+        );
+      });
+    }
+  });
+};
+
+var onJoinQun = function(code, username, callback) {
+  var nickname = _C[username].NickName;
+  console.log('用户<' + nickname + '>提交群令牌<' + code + '>，尝试入群');
+  apiJoinQun(code, nickname, function(err, result) {
+    if (err) return callback(err);
+
+    for (var i in _C) {
+      if (_C[i].NickName == result.name) {
+        console.log('令牌有效, 正在将用户<' + nickname + '>加入群<' + result.name + '>');
+        return callback();
+      }
+    }
+
+    msg = '加群过程中出现异常：找不到编号为(' + result.qunid + '), 名称为(' +
+      result.name + ')的微信群，操作终止！';
+
+    return callback(new Error(msg));
   });
 };
 
@@ -589,12 +648,14 @@ var processMsg = function(msg, callback) {
     }
   } else if (msg.MsgType == 1) {
     var cmd = msg.Content;
-    if (cmd.indexOf('JQ') == 0) {
+    if (cmd.length == 16) {
       var members = [
         msg.FromUserName,
         secondary
       ];
-      return onCreateQun(cmd.substr(2), members, callback);
+      return onCreateQun(cmd, members, callback);
+    } else if (cmd.length == 19) {
+      return onJoinQun(cmd, msg.FromUserName, callback);
     }
   }
 
@@ -650,7 +711,7 @@ var mainProc = function(entry) {
 
     var members = result.MemberList;
     for (var i in members) {
-      if (members[i].Alias == 'bailuxitian') {
+      if (members[i].NickName == '王政娇') {
         secondary = members[i].UserName
       }
     }
