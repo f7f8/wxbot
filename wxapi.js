@@ -410,3 +410,29 @@ var createChatRoom = function(url, context, topic, members, callback) {
 };
 
 exports.createChatRoom = createChatRoom;
+
+var addToChatRoom = function(url, context, room, member, callback) {
+  var qs = {
+    fun: 'addmember'
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.wxuin,
+      Sid: context.wxsid,
+      Skey: context.skey,
+      DeviceID: getDeviceId()
+    },
+    AddMemberList: member,
+    ChatRoomName: room
+  };
+
+  return httper.post(url, headers, qs, body, callback);
+};
+
+exports.addToChatRoom = addToChatRoom;

@@ -23,6 +23,7 @@ const WXAPI_WEB_SYNC          = '/cgi-bin/mmwebwx-bin/webwxsync';
 const WXAPI_VERIFY_USER       = '/cgi-bin/mmwebwx-bin/webwxverifyuser';
 const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
 const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
+const WXAPI_UPDATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxupdatechatroom';
 
 var _tick = 0;
 var _qrcode = '';
@@ -182,17 +183,53 @@ var onCreateQun = function(code, members, callback) {
   });
 };
 
+var addToChatRoom = function(member, room, callback) {
+  async.waterfall([
+    function(callback) {
+      var msg = '令牌有效, 正在将您 <' + member.NickName + '> 加入群 <' + room.NickName + '>';
+      logger.debug(msg);
+  
+      var url = wxUrl(null, WXAPI_SEND_MSG);
+      return wxapi.sendMsg(url, _context, member.UserName, msg, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    },
+    function(callback) {
+      var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
+      return wxapi.addToChatRoom(url, _context, room.UserName, member.UserName, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    },
+    function(callback) {
+      var msg = '热烈欢迎 <' + member.NickName + '> 加入本群！';
+      logger.debug(msg);
+  
+      var url = wxUrl(null, WXAPI_SEND_MSG);
+      return wxapi.sendMsg(url, _context, room.UserName, msg, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    }
+  ], function(err, result) {
+    return callback(err, result);
+  });
+};
+
 var onJoinQun = function(code, username, callback) {
-  var nickname = _C[username].NickName;
+  var member = _contacts[username];
+  var nickname = member.NickName;
+
   logger.debug('用户<' + nickname + '>提交群令牌<' + code + '>，尝试入群');
-  apiJoinQun(code, nickname, function(err, result) {
+  yunmof.joinQun(code, nickname, function(err, result) {
     if (err) return callback(err);
 
-    for (var i in _C) {
-      if (_C[i].NickName == result.name) {
-        logger.debug('令牌有效, 正在将用户<' + nickname + '>加入群<' + result.name + '>');
-        return callback();
-      }
+    var qunName = result.membership_join_response.name;
+
+    var qunExists = findContact(qunName);
+    if (qunExists) {
+      return addToChatRoom(member, qunExists, callback);
     }
 
     msg = '加群过程中出现异常：找不到编号为(' + result.qunid + '), 名称为(' +
