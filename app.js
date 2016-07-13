@@ -4,7 +4,6 @@ var async = require('async');
 const url = require('url');
 var fs = require('fs');
 
-var logger = require('./logger');
 var httper = require('./httper');
 var wxapi = require('./wxapi');
 var yunmof = require('./yunmof');
@@ -25,9 +24,6 @@ const WXAPI_VERIFY_USER       = '/cgi-bin/mmwebwx-bin/webwxverifyuser';
 const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
 const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
 
-const DUMMY_NICKNAME = '王政娇';
-const ASSISTANT = 'bot001';
-
 var _tick = 0;
 var _qrcode = '';
 var _loginedRedirect = '';
@@ -39,6 +35,39 @@ var _contacts = {};
 var _dummy = '';
 var _rooms = {};
 
+if (process.argv.length <= 3) {
+  console.log("用法: node app.js [机器人ID] [静默者昵称]");
+  process.exit(-1);
+}
+
+var _botid = process.argv[2];
+var _dummy_name = process.argv[3];
+var _log_path = './log/' + _botid;
+
+var rmdir = function(dirPath) {
+  try { var files = fs.readdirSync(dirPath); }
+  catch(e) { return; }
+  if (files.length > 0)
+    for (var i = 0; i < files.length; i++) {
+      var filePath = dirPath + '/' + files[i];
+      if (fs.statSync(filePath).isFile())
+        fs.unlinkSync(filePath);
+      else
+        rmDir(filePath);
+    }
+    fs.rmdirSync(dirPath);
+};
+
+try {
+  rmdir(_log_path);
+  fs.mkdirSync(_log_path);
+} catch(e) {
+  if (e.code != 'EEXIST') throw e;
+}
+
+var logger = require('./logger')(_log_path + '/applog.json');
+logger.info('机器人<' + _botid + '> 启动，静默者：' + _dummy_name);
+
 var wxUrl = function(subdomain, path) {
   return _wxBaseUrl.protocol + '//' +
     (subdomain ? subdomain + '.' : '') + _wxBaseUrl.hostname + path;
@@ -46,7 +75,7 @@ var wxUrl = function(subdomain, path) {
 
 var dumpContext = function() {
     fs.writeFileSync(
-      './log/' + _context.User.NickName + '(上下文).log',
+      _log_path + '/context.json',
       JSON.stringify(_context, null, 2),
       'utf8'
     );
@@ -54,46 +83,10 @@ var dumpContext = function() {
 
 var dumpContacts = function() {
     fs.writeFileSync(
-      './log/' + _context.User.NickName + '(联系人).log',
+      _log_path + '/contact.json',
       JSON.stringify(_contacts, null, 2),
       'utf8'
     );
-};
-
-var updateChatSet = function(callback) {
-  wxBatchGetContact(context.ChatSet, 'ex', function(err, result) {
-    if (err) return callback(err);
-
-    var list = result.ContactList;
-    for (var i in list) {
-      _C[list[i].UserName] = list[i];
-    }
-
-    fs.writeFileSync(
-      './log/' + _context.User.NickName + '(最近联系).log',
-      JSON.stringify(result, null, 2),
-      'utf8'
-    );
-    return callback();
-  });
-};
-
-var getCookie = function (cookies, e) {
-  for (var t = e + "=", o = cookies.split(";"), n = 0; n < o.length; n++) {
-    for (var r = o[n];" " == r.charAt(0);) {
-      r = r.substring(1);
-    }
-    
-    if (-1 != r.indexOf(t)) return r.substring(t.length, r.length);
-  }
-  return "";
-};
-
-var printContacts = function(contacts) {
-  for (var i in contacts) {
-    var c = contacts[i];
-    logger.debug('+++ ' + c.UserName + ' ' + c.NickName + ' (' + c.Alias + ')');
-  }
 };
 
 var onStrangerInviting = function(msg, callback) {
@@ -119,7 +112,7 @@ var onStrangerInviting = function(msg, callback) {
 var onCreateQun = function(code, members, callback) {
   var owner = _contacts[members[0]];
   logger.debug('用户 <' + owner.NickName + '> 请求建群...');
-  yunmof.createQun(code, owner.NickName, ASSISTANT, function(err, result) {
+  yunmof.createQun(code, owner.NickName, _botid, function(err, result) {
     if (err) return callback(err);
     
     var qunName = result.qun_create_response.name;
@@ -271,7 +264,7 @@ var aiUpdate = function(incoming, callback) {
     return callback();
 
   fs.appendFileSync(
-    './log/' + _context.User.NickName + '(响应).log',
+    _log_path + '/incoming.log',
     JSON.stringify(incoming, null, 2) + '\n\n'
   );
 
@@ -296,36 +289,6 @@ var aiUpdate = function(incoming, callback) {
     }
   ], function(err, result) {
     return callback(err, result);
-  });
-};
-
-var loopProc = function(callback) {
-  async.waterfall([syncUpdate, aiUpdate], function(err, result) {
-    if (err) return callback(err);
-    return callback(null, result);
-  });
-};
-
-var mainProc = function(entry) {
-  wxBaseUrl = url.parse(entry);
-
-  var doInit = async.compose(updateChatSet, wxGetContacts, wxStatusNotify, wxInit, loginRedirect);
-  doInit(entry, function(err, result) {
-    if (err) {
-      return logger.debug(err);
-    };
-
-    setTimeout(function() {
-      var callee = arguments.callee;
-      loopProc(function(err) {
-        if (err) {
-          logger.debug(err);
-          return logger.debug('<sys> 应用退出');
-        }
-
-        setTimeout(callee, 1000);
-      });
-    }, 1000);
   });
 };
 
@@ -377,20 +340,9 @@ var loadAfterLogin = function(callback) {
         logger.debug('读取到用户【' + result.User.NickName + '】的基本信息！');
 
         fs.writeFileSync(
-          './log/' + _context.User.NickName + '(响应).log',
+          _log_path + '/incoming.log',
           ''
         );
-
-        fs.writeFileSync(
-          './log/' + _context.User.NickName + '(上下文).log',
-          ''
-        );
-
-        fs.writeFileSync(
-          './log/' + _context.User.NickName + '(联系人).log',
-          ''
-        );
-
         dumpContext();
         return callback();
       });
@@ -414,7 +366,7 @@ var loadAfterLogin = function(callback) {
         for (var i in members) {
           _contacts[members[i].UserName] = members[i];
 
-          if (members[i].NickName == DUMMY_NICKNAME) {
+          if (members[i].NickName == _dummy_name) {
             _dummy = members[i].UserName
           }
         }
@@ -527,7 +479,7 @@ async.waterfall([
   function(code, callback) {
     logger.info('下载二维码图片...');
 
-    var filename = 'qrs/login.jpg';
+    var filename = 'qrs/' + _botid + '.jpg';
     wxapi.downloadQRImage(WXAPI_QR, code, filename, function(err) {
       if (err) return callback(err);
 
