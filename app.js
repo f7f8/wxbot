@@ -89,6 +89,16 @@ var dumpContacts = function() {
     );
 };
 
+var findContact = function(nickname) {
+  for (var username in _contacts) {
+    var c = _contacts[username];
+    if (c.NickName == nickname)
+      return c;
+  }
+
+  return null;
+};
+
 var onStrangerInviting = function(msg, callback) {
   var url = wxUrl(null, WXAPI_VERIFY_USER);
   var username = msg.RecommendInfo.UserName;
@@ -110,7 +120,7 @@ var onStrangerInviting = function(msg, callback) {
 };
 
 var onCreateQun = function(code, members, callback) {
-  var owner = _contacts[members[0]];
+  var owner = _contacts[members[1]];
   logger.debug('用户 <' + owner.NickName + '> 请求建群...');
   yunmof.createQun(code, owner.NickName, _botid, function(err, result) {
     if (err) return callback(err);
@@ -120,11 +130,27 @@ var onCreateQun = function(code, members, callback) {
     var qunid = result.qun_create_response.qunid;
     
     logger.debug('用户 <' + owner.NickName + '> 建群操作获得许可，群名：' + qunName);
+
+    var qunExists = findContact(qunName);
+    if (qunExists) {
+      var url = wxUrl(null, WXAPI_SEND_MSG);
+      var msg = '付费群“' + qunName + '”已经存在，请快快推广吧！\n\n' + qunUrl;
+      logger.debug(msg);
+      return wxapi.sendMsg(url, _context, owner.UserName, msg, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    }
   
     var url = wxUrl(null, WXAPI_CREATE_CHAT_ROOM);
     wxapi.createChatRoom(url, _context, qunName, members, function(err, result) {
       if (err) return callback(err);
-      
+      if (result.Topic.length <= 0) {
+        return callback(
+          new Error('建群失败：\n' + result.BaseResponse.ErrMsg)
+        );
+      }
+
       logger.debug('付费群 <' + qunName + '> 创建成功！');
 
       _rooms[qunid] = {
@@ -222,8 +248,8 @@ var processMsg = function(msg, callback) {
 
     if (cmd.length == 16) {
       var members = [
-        msg.FromUserName,
-        _dummy
+        _dummy,
+        msg.FromUserName
       ];
       return onCreateQun(cmd, members, callback);
     } else if (cmd.length == 19) {
