@@ -380,8 +380,7 @@ var sendMsg = function(url, context, receiver, content, callback) {
 
 exports.sendMsg = sendMsg;
 
-var wxCreateChatRoom = function(topic, members, callback) {
-  var url = wxUrl(null, '/cgi-bin/mmwebwx-bin/webwxcreatechatroom');
+var createChatRoom = function(url, context, topic, members, callback) {
   var qs = {
     r: (new Date()).getTime()
   };
@@ -393,9 +392,9 @@ var wxCreateChatRoom = function(topic, members, callback) {
 
   var body = {
     BaseRequest: {
-      Uin: context.uin,
-      Sid: context.sid,
-      Skey: context.SKey,
+      Uin: context.wxuin,
+      Sid: context.wxsid,
+      Skey: context.skey,
       DeviceID: getDeviceId()
     },
     Topic: topic,
@@ -407,7 +406,7 @@ var wxCreateChatRoom = function(topic, members, callback) {
     body.MemberList.push({UserName: members[i]});
   }
 
-  console.log('<sys> 创建新群 <' + topic + '>');
-
-  return POST(url, headers, qs, body, callback);
+  return httper.post(url, headers, qs, body, callback);
 };
+
+exports.createChatRoom = createChatRoom;

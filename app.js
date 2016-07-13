@@ -5,8 +5,9 @@ const url = require('url');
 var fs = require('fs');
 
 var logger = require('./logger');
-var wxapi = require('./wxapi');
 var httper = require('./httper');
+var wxapi = require('./wxapi');
+var yunmof = require('./yunmof');
 
 const WX_ENTRY_URL = 'https://web.weixin.qq.com/';
 const WXAPI_JSLOGIN = 'https://login.wx.qq.com/jslogin';
@@ -22,6 +23,10 @@ const WXAPI_SYNC_CHECK        = '/cgi-bin/mmwebwx-bin/synccheck';
 const WXAPI_WEB_SYNC          = '/cgi-bin/mmwebwx-bin/webwxsync';
 const WXAPI_VERIFY_USER       = '/cgi-bin/mmwebwx-bin/webwxverifyuser';
 const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
+const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
+
+const DUMMY_NICKNAME = '王政娇';
+const ASSISTANT = 'bot001';
 
 var _tick = 0;
 var _qrcode = '';
@@ -32,11 +37,7 @@ var _context = {};
 var _wxBaseUrl = null;
 var _contacts = {};
 var _dummy = '';
-
-var qr = '';
-var context = {};
-var _C = {};
-var _R = {};
+var _rooms = {};
 
 var wxUrl = function(subdomain, path) {
   return _wxBaseUrl.protocol + '//' +
@@ -95,38 +96,6 @@ var printContacts = function(contacts) {
   }
 };
 
-var apiCreateQun = function(code, owner, assistant, callback) {
-  var url = 'http://qun.test.yunmof.com/wxbot/qun';
-  var body = {
-    code: code,
-    owner: owner,
-    assistant: assistant
-  };
-
-  POST(url, null, null, body, function(err, data) {
-    if (err) return callback(err);
-
-    return callback(null, JSON.parse(data));
-  });
-};
-
-var apiJoinQun = function(token, nickname, callback) {
-  var url = 'http://qun.test.yunmof.com/wxbot/qun/membership';
-  var body = {
-    token: token,
-    nickname: nickname
-  };
-
-  POST(url, null, null, body, function(err, data) {
-    if (err) return callback(err);
-
-    var result = JSON.parse(data);
-    if (result.error) return callback(result.err);
-
-    return callback(null, result.membership_join_response);
-  });
-};
-
 var onStrangerInviting = function(msg, callback) {
   var url = wxUrl(null, WXAPI_VERIFY_USER);
   var username = msg.RecommendInfo.UserName;
@@ -148,23 +117,49 @@ var onStrangerInviting = function(msg, callback) {
 };
 
 var onCreateQun = function(code, members, callback) {
-  apiCreateQun(code, _C[members[0]].NickName, context.User.UserName, function(err, result) {
-    if (result) {
-      var qunName = result.qun_create_response.name;
-      var url = result.qun_create_response.url;
-      var qunid = result.qun_create_response.qunid;
+  var owner = _contacts[members[0]];
+  logger.debug('用户 <' + owner.NickName + '> 请求建群...');
+  yunmof.createQun(code, owner.NickName, ASSISTANT, function(err, result) {
+    if (err) return callback(err);
+    
+    var qunName = result.qun_create_response.name;
+    var qunUrl = result.qun_create_response.url;
+    var qunid = result.qun_create_response.qunid;
+    
+    logger.debug('用户 <' + owner.NickName + '> 建群操作获得许可，群名：' + qunName);
+  
+    var url = wxUrl(null, WXAPI_CREATE_CHAT_ROOM);
+    wxapi.createChatRoom(url, _context, qunName, members, function(err, result) {
+      if (err) return callback(err);
+      
+      logger.debug('付费群 <' + qunName + '> 创建成功！');
 
-      wxCreateChatRoom(qunName, members, function(err, result) {
-        logger.debug(result);
+      _rooms[qunid] = {
+        name: qunName,
+        url: qunUrl,
+        username: result.ChatRoomName
+      };
 
-        _R[qunid] = {name: qunName, url: url};
-        return sendMsg(
-          result.ChatRoomName,
-          '付费群“' + result.Topic + '”创建成功！回复“我要提现”可将群收入提现至微信钱包！\n\n' + url,
-          callback
-        );
+      var url = wxUrl(null, WXAPI_SEND_MSG);
+      async.waterfall([
+        function(callback) {
+          var msg = '付费群“' + result.Topic + '”创建成功！回复“我要提现”可将群收入提现至微信钱包！\n\n' + qunUrl;
+          wxapi.sendMsg(url, _context, owner.UserName, msg, function(err, result) {
+            if (err) return callback(err);
+            callback();
+          });
+        },
+        function(callback) {
+          var msg = '付费群“' + result.Topic + '”创建成功！';
+          wxapi.sendMsg(url, _context, result.ChatRoomName, msg, function(err, result) {
+            if (err) return callback(err);
+            callback();
+          });
+        }
+      ], function(err, result) {
+        return callback(err, result);
       });
-    }
+    });
   });
 };
 
@@ -203,6 +198,10 @@ var onContactMod = function(entry, callback) {
     logger.debug('好友 <' + entry.NickName + '> 资料已经更新！');
     return callback();
   } else {
+    if (entry.MemberCount && entry.MemberCount > 0) {
+      return callback();
+    }
+
     logger.debug('新增好友 <' + entry.NickName + '>！');
     return welcomeNewcomer(entry.UserName, callback);
   }
@@ -216,22 +215,22 @@ var welcomeNewcomer = function(username, callback) {
 
 var processMsg = function(msg, callback) {
   /*
-  logger.debug('---------------------------------------------------');
-  logger.debug('> ' + msg.MsgType);
-  logger.debug('> ' + msg.FromUserName + ": " + httper.htmlDecode(msg.Content));
-  logger.debug('---------------------------------------------------');
-  logger.debug('');
-  */
+     logger.debug('---------------------------------------------------');
+     logger.debug('> ' + msg.MsgType);
+     logger.debug('> ' + msg.FromUserName + ": " + httper.htmlDecode(msg.Content));
+     logger.debug('---------------------------------------------------');
+     logger.debug('');
+     */
 
   if (msg.FromUserName == 'fmessage') {
     return onStrangerInviting(msg, callback);
   } else if (msg.MsgType == 1) {
-    return callback();
     var cmd = msg.Content;
+
     if (cmd.length == 16) {
       var members = [
         msg.FromUserName,
-        secondary
+        _dummy
       ];
       return onCreateQun(cmd, members, callback);
     } else if (cmd.length == 19) {
@@ -374,7 +373,7 @@ var loadAfterLogin = function(callback) {
         _context.User = result.User;
         _context.SyncKey = result.SyncKey;
         _context.ChatSet = result.ChatSet.split(',');
-        
+
         logger.debug('读取到用户【' + result.User.NickName + '】的基本信息！');
 
         fs.writeFileSync(
@@ -391,7 +390,7 @@ var loadAfterLogin = function(callback) {
           './log/' + _context.User.NickName + '(联系人).log',
           ''
         );
-        
+
         dumpContext();
         return callback();
       });
@@ -401,7 +400,7 @@ var loadAfterLogin = function(callback) {
       var url = wxUrl(null, WXAPI_STATUS_NOTIFY);
       wxapi.statusNotify(url, _context, function(err, result) {
         if (err) return callback(err);
-        
+
         return callback();
       });
     },
@@ -410,12 +409,12 @@ var loadAfterLogin = function(callback) {
       var url = wxUrl(null, WXAPI_GET_CONTACTS);
       wxapi.getContacts(url, _context, function(err, result) {
         if (err) return callback(err);
-        
+
         var members = result.MemberList;
         for (var i in members) {
           _contacts[members[i].UserName] = members[i];
 
-          if (members[i].NickName == '王政娇') {
+          if (members[i].NickName == DUMMY_NICKNAME) {
             _dummy = members[i].UserName
           }
         }
@@ -436,7 +435,7 @@ var loadAfterLogin = function(callback) {
         for (var i in list) {
           _contacts[list[i].UserName] = list[i];
         }
-        
+
         logger.debug('共发现 ' + list.length + ' 个最近互动联系人');
         dumpContacts();
         return callback();
