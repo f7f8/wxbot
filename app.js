@@ -45,8 +45,16 @@ var wxUrl = function(subdomain, path) {
 
 var dumpContext = function() {
     fs.writeFileSync(
-      'log/usercontext.json',
+      './log/' + _context.User.NickName + '(上下文).log',
       JSON.stringify(_context, null, 2),
+      'utf8'
+    );
+};
+
+var dumpContacts = function() {
+    fs.writeFileSync(
+      './log/' + _context.User.NickName + '(联系人).log',
+      JSON.stringify(_contacts, null, 2),
       'utf8'
     );
 };
@@ -60,8 +68,11 @@ var updateChatSet = function(callback) {
       _C[list[i].UserName] = list[i];
     }
 
-    var js = JSON.stringify(result, null, 2);
-    fs.writeFileSync('chatset.json', js, 'utf8');
+    fs.writeFileSync(
+      './log/' + _context.User.NickName + '(最近联系).log',
+      JSON.stringify(result, null, 2),
+      'utf8'
+    );
     return callback();
   });
 };
@@ -243,10 +254,8 @@ var syncUpdate = function(callback) {
       return callback(new Error('心跳同步中断！'));
     }
 
-    logger.debug('本轮共有 ' + result.selector + ' 条新消息！')
-    
     if (result.selector > 0) {
-      logger.info('开始同步新消息...');
+      logger.debug('本轮共有 ' + result.selector + ' 条新消息, 立即拉取！')
       var url = wxUrl(null, WXAPI_WEB_SYNC);
       return wxapi.webSync(url, _context, function(err, result) {
         _context.SyncKey = result.SyncKey;
@@ -262,7 +271,10 @@ var aiUpdate = function(incoming, callback) {
   if (incoming == null)
     return callback();
 
-  fs.appendFileSync('./log/' + _context.User.NickName + '.log', JSON.stringify(incoming, null, 2) + '\n');
+  fs.appendFileSync(
+    './log/' + _context.User.NickName + '(响应).log',
+    JSON.stringify(incoming, null, 2) + '\n\n'
+  );
 
   async.waterfall([
     function(callback) {
@@ -350,7 +362,6 @@ var loadAfterLogin = function(callback) {
         _context.passTicket = result.pass_ticket;
 
         logger.info('读取到关键登录授权信息！');
-        dumpContext();
         return callback(null);
       });
     },
@@ -365,8 +376,23 @@ var loadAfterLogin = function(callback) {
         _context.ChatSet = result.ChatSet.split(',');
         
         logger.debug('读取到用户【' + result.User.NickName + '】的基本信息！');
+
+        fs.writeFileSync(
+          './log/' + _context.User.NickName + '(响应).log',
+          ''
+        );
+
+        fs.writeFileSync(
+          './log/' + _context.User.NickName + '(上下文).log',
+          ''
+        );
+
+        fs.writeFileSync(
+          './log/' + _context.User.NickName + '(联系人).log',
+          ''
+        );
+        
         dumpContext();
-        fs.writeFileSync('./log/' + _context.User.NickName + '.log', '登录成功！\n');
         return callback();
       });
     },
@@ -396,7 +422,7 @@ var loadAfterLogin = function(callback) {
 
         logger.debug('共发现 ' + result.MemberCount + ' 个联系人');
 
-        fs.writeFileSync('contacts.json', JSON.stringify(members, null, 2), 'utf8');
+        dumpContacts();
         return callback();
       });
     },
@@ -412,8 +438,7 @@ var loadAfterLogin = function(callback) {
         }
         
         logger.debug('共发现 ' + list.length + ' 个最近互动联系人');
-
-        fs.writeFileSync('chatset.json', JSON.stringify(list, null, 2), 'utf8');
+        dumpContacts();
         return callback();
       });
     }
