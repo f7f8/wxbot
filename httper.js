@@ -21,7 +21,8 @@ exports.get = function(url, headers, qs, callback) {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.86 Safari/537.36',
       'Accept-Language': 'zh-CN,zh;q=0.8,en;q=0.6,zh-TW;q=0.4'
     },
-    jar: jar
+    jar: jar,
+    timeout: 35e3
   };
 
   if (qs) {
@@ -57,7 +58,8 @@ exports.post = function(url, headers, qs, body, callback) {
       'Accept-Language': 'zh-CN,zh;q=0.8,en;q=0.6,zh-TW;q=0.4'
     },
     formData: body,
-    jar: jar
+    jar: jar,
+    timeout: 35e3
   };
 
   if (qs) {
