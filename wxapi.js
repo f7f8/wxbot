@@ -79,7 +79,8 @@ var downloadQRImage = function(serviceUrl, code, filename, callback) {
       'Accept': 'image/webp,image/*,*/*;q=0.8',
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.86 Safari/537.36',
       'Accept-Language': 'zh-CN,zh;q=0.8,en;q=0.6,zh-TW;q=0.4'
-    }
+    },
+    timeout: 15e3
   };
 
   request(options)
@@ -222,7 +223,7 @@ var getContacts = function(url, context, callback) {
 
 exports.getContacts = getContacts;
 
-var batchGetContact = function(url, context, type, callback) {
+var batchGetContact = function(url, context, list, type, callback) {
   var qs = {
     type: type,
     r: (new Date()).getTime()
@@ -232,8 +233,6 @@ var batchGetContact = function(url, context, type, callback) {
     'Accept': 'application/json, text/plain, */*',
     'Content-Type': 'application/json;charset=UTF-8'
   };
-
-  var list = context.ChatSet;
 
   var body = {
     BaseRequest: {
