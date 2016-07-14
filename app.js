@@ -25,7 +25,7 @@ const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
 const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
 const WXAPI_UPDATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxupdatechatroom';
 
-var _tick = 0;
+var _tick = (new Date()).getTime();
 var _qrcode = '';
 var _loginedRedirect = '';
 var _logined = false;
@@ -59,8 +59,20 @@ var rmdir = function(dirPath) {
     fs.rmdirSync(dirPath);
 };
 
+var rm = function(path) {
+  try {
+    if (fs.statSync(path).isFile())
+      fs.unlinkSync(path);
+  } catch(e) {
+    if (e.code != 'ENOENT') throw e;
+  }
+};
+
 try {
-  rmdir(_log_path);
+  rm(_log_path + '/applog.json');
+  rm(_log_path + '/contact.json');
+  rm(_log_path + '/context.json');
+  rm(_log_path + '/incoming.log');
   fs.mkdirSync(_log_path);
 } catch(e) {
   if (e.code != 'EEXIST') throw e;
@@ -100,12 +112,70 @@ var findContact = function(nickname) {
   return null;
 };
 
+var addContact = function(e) {
+  if (!(e.UserName in _contacts)) return _contacts[e.UserName] = e;
+
+  for (var n in e) {
+    _contacts[e.UserName][n] = e[n];
+  }
+};
+
+var loadRooms = function(path) {
+  var s = fs.readFileSync(path, "utf8");
+  _rooms = JSON.parse(s);
+};
+
+var addRoom = function(qunid, username, nickname, url) {
+  _rooms[qunid] = {
+    username: username,
+    nickname: nickname,
+    url: url,
+    members: []
+  };
+};
+
+var isRoomContact = function(e) {
+  return e ? /^@@|@chatroom$/.test(e) : !1;
+};
+
+var isMyRoom = function(e) {
+  return e.OwnerUin == _context.User.Uin || 
+    e.ChatRoomOwner == _context.User.UserName;
+};
+
+var findRoomByNick = function(e) {
+  for (var id in _rooms) {
+    if (_rooms[id].nickname == e) return _rooms[id];
+  }
+
+  return null;
+};
+
+var updateRoom = function(e, importMembers) {
+  var r = findRoomByNick(e.NickName);
+  
+  if (null == r) return;
+  r.username = e.UserName;
+ 
+  if (importMembers || r.members.length == 0) {
+    if (e.MemberCount > 0) {
+      for (var n in e.MemberList) {
+        var m = e.MemberList[n];
+        r.members.indexOf(m.NickName) == -1 && r.members.push(m.NickName);
+      }
+    }
+  }
+
+  var s = JSON.stringify(_rooms, null, 2);
+  fs.writeFileSync(_log_path + '/qun.json', s, "utf8");
+};
+
 var onStrangerInviting = function(msg, callback) {
   var url = wxUrl(null, WXAPI_VERIFY_USER);
   var username = msg.RecommendInfo.UserName;
   var ticket = msg.RecommendInfo.Ticket;
   var nickname = msg.RecommendInfo.NickName;
-  
+
   logger.debug('收到 <' + nickname + '> 的添加好友邀请...');
   wxapi.verifyUser(url, _context, username, ticket, function(err, result) {
     if (err) return callback(err);
@@ -130,7 +200,7 @@ var onCreateQun = function(code, members, callback) {
     var qunUrl = result.qun_create_response.url;
     var qunid = result.qun_create_response.qunid;
     
-    logger.debug('用户 <' + owner.NickName + '> 建群操作获得许可，群名：' + qunName);
+    logger.debug('用户 <' + owner.NickName + '> 建群操作获得许可，[' + qunid + ']<' + qunName + '>');
 
     var qunExists = findContact(qunName);
     if (qunExists) {
@@ -154,11 +224,7 @@ var onCreateQun = function(code, members, callback) {
 
       logger.debug('付费群 <' + qunName + '> 创建成功！');
 
-      _rooms[qunid] = {
-        name: qunName,
-        url: qunUrl,
-        username: result.ChatRoomName
-      };
+      addRoom(qunid, result.ChatRoomName, qunName, qunUrl);
 
       var url = wxUrl(null, WXAPI_SEND_MSG);
       async.waterfall([
@@ -229,7 +295,8 @@ var onJoinQun = function(code, username, callback) {
 
     var qunExists = findContact(qunName);
     if (qunExists) {
-      return addToChatRoom(member, qunExists, callback);
+      return addToChatRoom(member, qunExists, function(err, result) {
+      });
     }
 
     msg = '加群过程中出现异常：找不到编号为(' + result.qunid + '), 名称为(' +
@@ -249,12 +316,16 @@ var onContactDel = function(entry, callback) {
 
 var onContactMod = function(entry, callback) {
   var exists = (entry.UserName in _contacts);
-  _contacts[entry.UserName] = entry;;
+  addContact(entry);
   if (exists) {
     logger.debug('好友 <' + entry.NickName + '> 资料已经更新！');
     return callback();
   } else {
-    if (entry.MemberCount && entry.MemberCount > 0) {
+    if (isRoomContact(entry.UserName)) {
+      logger.debug('群 <' + entry.NickName + '> 资料已经更新！');
+      if (isMyRoom(entry)) {
+        updateRoom(entry, false);
+      }
       return callback();
     }
 
@@ -270,13 +341,13 @@ var welcomeNewcomer = function(username, callback) {
 };
 
 var processMsg = function(msg, callback) {
-  /*
-     logger.debug('---------------------------------------------------');
-     logger.debug('> ' + msg.MsgType);
-     logger.debug('> ' + msg.FromUserName + ": " + httper.htmlDecode(msg.Content));
-     logger.debug('---------------------------------------------------');
-     logger.debug('');
-     */
+
+  var sender = _contacts[msg.FromUserName];
+  logger.debug('---------------------------------------------------');
+  logger.debug('> ' + msg.MsgType);
+  logger.debug('> ' + sender.NickName + ": " + httper.htmlDecode(msg.Content));
+  logger.debug('---------------------------------------------------');
+  logger.debug('');
 
   if (msg.FromUserName == 'fmessage') {
     return onStrangerInviting(msg, callback);
@@ -298,12 +369,14 @@ var processMsg = function(msg, callback) {
 };
 
 var syncUpdate = function(callback) {
-  logger.info('💓 💓 💓 💓 💓 💓 ');
+  logger.info('💓 💓 💓 💓 💓 💓  ' + _tick);
   var url = wxUrl(null, WXAPI_SYNC_CHECK);
   wxapi.syncCheck(url, _context, _tick, function(err, result) {
-    if (err) return callback(err);
-
     _tick += 1;
+    
+    if (err) {
+      return callback(null, null);
+    }
 
     if (result.retcode != 0) {
       return callback(new Error('心跳同步中断！'));
@@ -351,24 +424,27 @@ var aiUpdate = function(incoming, callback) {
       });
     }
   ], function(err, result) {
+    dumpContacts();
     return callback(err, result);
   });
 };
 
 var waitForScanning = function(callback) {
   wxapi.getLoginResult(WXAPI_LOGIN, _qrcode, _tick, function(err, result) {
-    if (err) return callback(err);
+    _tick += 1;
+    if (err) return callback();
 
     if (result.code == 201) {
       logger.info('用户已经扫码，等待确认...');
     } else if (result.code == 200) {
       logger.debug('扫码确认完成，跳转至：' + result.redirectUrl);
       return callback(null, result.redirectUrl);
+    } else if (result.code == 400) {
+      return callback(new Error('等待扫码超时！'));
     } else {
       logger.debug('等待用户扫码，状态：' + result.code);
     }
 
-    _tick += 1;
     return callback();
   });
 };
@@ -427,10 +503,15 @@ var loadAfterLogin = function(callback) {
 
         var members = result.MemberList;
         for (var i in members) {
-          _contacts[members[i].UserName] = members[i];
+          var member = members[i];
+          addContact(member);
+
+          if (isRoomContact(member.UserName) && isMyRoom(member)) {
+            updateRoom(member, false);
+          }
 
           if (members[i].NickName == _dummy_name) {
-            _dummy = members[i].UserName
+            _dummy = member.UserName;
           }
         }
 
@@ -443,12 +524,17 @@ var loadAfterLogin = function(callback) {
     function(callback) {
       logger.info('更新最近互动联系人资料...');
       var url = wxUrl(null, WXAPI_BATCH_GET_CONTACT );
-      wxapi.batchGetContact(url, _context, 'ex', function(err, result) {
+      wxapi.batchGetContact(url, _context, _context.ChatSet, 'ex', function(err, result) {
         if (err) return callback(err);
 
         var list = result.ContactList;
         for (var i in list) {
-          _contacts[list[i].UserName] = list[i];
+          addContact(list[i]);
+
+          var member = list[i];
+          if (isRoomContact(member.UserName) && isMyRoom(member)) {
+            updateRoom(member, false);
+          }
         }
 
         logger.debug('共发现 ' + list.length + ' 个最近互动联系人');
@@ -481,6 +567,7 @@ var mainLoop= function() {
   }
 
   if (!_loaded) {
+    loadRooms(_log_path + '/qun.json');
     return loadAfterLogin(function(err, result) {
       if (err) {
         logger.error('加载用户基本信息过程发生未知错误，具体如下：');
@@ -556,7 +643,6 @@ async.waterfall([
     return logger.error(err);
   };
 
-  _tick = (new Date()).getTime();
   logger.info('登录会话开始时间计数<' + _tick + '>，请扫描二维码！');
 
   _qrcode = qrcode;
