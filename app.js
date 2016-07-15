@@ -151,6 +151,14 @@ var findRoomByNick = function(e) {
   return null;
 };
 
+var addToRoom = function(qunid, nickname) {
+  var r = _rooms[qunid];
+  r.members.indexOf(nickname) == -1 && r.members.push(nickname);
+  
+  var s = JSON.stringify(_rooms, null, 2);
+  fs.writeFileSync(_log_path + '/qun.json', s, "utf8");
+};
+
 var updateRoom = function(e, importMembers) {
   var r = findRoomByNick(e.NickName);
   
@@ -249,7 +257,7 @@ var onCreateQun = function(code, members, callback) {
   });
 };
 
-var addToChatRoom = function(member, room, callback) {
+var addToChatRoom = function(qunid, member, room, callback) {
   async.waterfall([
     function(callback) {
       var msg = '令牌有效, 正在将您 <' + member.NickName + '> 加入群 <' + room.NickName + '>';
@@ -265,6 +273,7 @@ var addToChatRoom = function(member, room, callback) {
       var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
       return wxapi.addToChatRoom(url, _context, room.UserName, member.UserName, function(err, result) {
         if (err) return callback(err);
+        addToRoom(qunid, member.NickName);
         callback();
       });
     },
@@ -291,11 +300,14 @@ var onJoinQun = function(code, username, callback) {
   yunmof.joinQun(code, nickname, function(err, result) {
     if (err) return callback(err);
 
+    var qunId = result.membership_join_response.qunid;
     var qunName = result.membership_join_response.name;
 
     var qunExists = findContact(qunName);
     if (qunExists) {
-      return addToChatRoom(member, qunExists, function(err, result) {
+      return addToChatRoom(qunId, member, qunExists, function(err, result) {
+        if (err) return callback(err);
+        return callback();
       });
     }
 
