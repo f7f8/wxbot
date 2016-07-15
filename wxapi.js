@@ -435,3 +435,29 @@ var addToChatRoom = function(url, context, room, member, callback) {
 };
 
 exports.addToChatRoom = addToChatRoom;
+
+var delFromChatRoom = function(url, context, room, member, callback) {
+  var qs = {
+    fun: 'delmember'
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.wxuin,
+      Sid: context.wxsid,
+      Skey: context.skey,
+      DeviceID: getDeviceId()
+    },
+    DelMemberList: member,
+    ChatRoomName: room
+  };
+
+  return httper.post(url, headers, qs, body, callback);
+};
+
+exports.delFromChatRoom = delFromChatRoom;
