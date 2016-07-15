@@ -159,6 +159,12 @@ var addToRoom = function(qunid, nickname) {
   fs.writeFileSync(_log_path + '/qun.json', s, "utf8");
 };
 
+var isInRoom = function(roomnick, membernick) {
+  var r = findRoomByNick(roomnick);
+  if (null == r) return false;
+  return r.members.indexOf(membernick) >= 0;
+};
+
 var updateRoom = function(e, importMembers) {
   var r = findRoomByNick(e.NickName);
   
@@ -176,6 +182,27 @@ var updateRoom = function(e, importMembers) {
 
   var s = JSON.stringify(_rooms, null, 2);
   fs.writeFileSync(_log_path + '/qun.json', s, "utf8");
+};
+
+var updateContactList = function(idList, callback) {
+  var url = wxUrl(null, WXAPI_BATCH_GET_CONTACT );
+  wxapi.batchGetContact(url, _context, idList, 'ex', function(err, result) {
+    if (err) return callback(err);
+
+    var list = result.ContactList;
+    for (var i in list) {
+      addContact(list[i]);
+
+      var member = list[i];
+      if (isRoomContact(member.UserName) && isMyRoom(member)) {
+        updateRoom(member, false);
+      }
+    }
+
+    logger.debug('共更新了 ' + list.length + ' 个联系人资料！');
+    dumpContacts();
+    return callback(null, result);
+  });
 };
 
 var onStrangerInviting = function(msg, callback) {
@@ -352,6 +379,49 @@ var welcomeNewcomer = function(username, callback) {
   return wxapi.sendMsg(url, _context, username, msg, callback);
 };
 
+var onChatRoomInviting = function(room, inviter, invitee, callback) {
+  updateContactList([room.UserName], function(err, result) {
+    if (err) return callback(err);
+
+    var illegal = null;
+    if (inviter != '你') {
+      var members = result.ContactList[0].MemberList;
+      for (var i in members) {
+        if (members[i].NickName == invitee) {
+          illegal = members[i];
+          break;
+        }
+      }
+    }
+
+    if (illegal) {
+      var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
+      return wxapi.delFromChatRoom(url, _context, room.UserName, members[i].UserName, function(err, result) {
+        var url = wxUrl(null, WXAPI_SEND_MSG);
+        var msg = '[警告]: ' + inviter + ' 未经授权邀请 ' + invitee + ' 入群，已经处理！';
+        logger.info(msg);
+        wxapi.sendMsg(url, _context, room.UserName, msg, callback);
+      });
+    }
+
+    return callback();
+  });
+};
+
+var systemMsgDispatcher = function(sourceUserName, content, callback) {
+  if (!(sourceUserName in _contacts))
+    return callback(new Error('无效的系统信息来源！'));
+
+  var source = _contacts[sourceUserName];
+
+  var inviting = content.match(/(.+)邀请(.+)加入了群聊$/);
+  if (inviting) {
+    return onChatRoomInviting(source, inviting[1], inviting[2], callback);
+  }
+
+  return callback();
+};
+
 var processMsg = function(msg, callback) {
 
   var sender = _contacts[msg.FromUserName];
@@ -375,6 +445,11 @@ var processMsg = function(msg, callback) {
     } else if (cmd.length == 19) {
       return onJoinQun(cmd, msg.FromUserName, callback);
     }
+  } else if (msg.MsgType == 10000) {
+    var from = msg.FromUserName;
+    var content = msg.Content;
+
+    return systemMsgDispatcher(from, content, callback);
   }
 
   return callback();
@@ -535,24 +610,7 @@ var loadAfterLogin = function(callback) {
     },
     function(callback) {
       logger.info('更新最近互动联系人资料...');
-      var url = wxUrl(null, WXAPI_BATCH_GET_CONTACT );
-      wxapi.batchGetContact(url, _context, _context.ChatSet, 'ex', function(err, result) {
-        if (err) return callback(err);
-
-        var list = result.ContactList;
-        for (var i in list) {
-          addContact(list[i]);
-
-          var member = list[i];
-          if (isRoomContact(member.UserName) && isMyRoom(member)) {
-            updateRoom(member, false);
-          }
-        }
-
-        logger.debug('共发现 ' + list.length + ' 个最近互动联系人');
-        dumpContacts();
-        return callback();
-      });
+      return updateContactList(_context.ChatSet, callback);
     }
   ], function(err, qrcode) {
     if (err) return callback(err);
