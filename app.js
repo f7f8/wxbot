@@ -391,23 +391,15 @@ var onChatRoomInviting = function(room, inviter, invitees, callback) {
         for (var i in members) {
           var m = members[i];
           if (inviteeList.indexOf(m.NickName) >= 0) {
-            illegals.push(m);
+            illegals.push(m.UserName);
           }
         }
       }
 
       if (illegals.length == 0) return callback();
 
-      async.eachSeries(illegals, function(m, callback) {
-        setTimeout(function() {
-          var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
-          logger.info('删除未授权的群成员：' + m.NickName + ' [' + room.NickName + ']');
-          wxapi.delFromChatRoom(url, _context, room.UserName, m.UserName, function(err, result) {
-            console.log(result);
-            return callback();
-          });
-        }, 5000);
-      }, function(err) {
+      var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
+      wxapi.delFromChatRoom(url, _context, room.UserName, illegals.join(','), function(err, result) {
         var url = wxUrl(null, WXAPI_SEND_MSG);
         var msg = '[警告]: ' + inviter + ' 未经授权邀请 ' + invitees + ' 入群，已经处理！';
         logger.info(msg);
