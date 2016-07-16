@@ -379,33 +379,45 @@ var welcomeNewcomer = function(username, callback) {
   return wxapi.sendMsg(url, _context, username, msg, callback);
 };
 
-var onChatRoomInviting = function(room, inviter, invitee, callback) {
-  updateContactList([room.UserName], function(err, result) {
-    if (err) return callback(err);
+var onChatRoomInviting = function(room, inviter, invitees, callback) {
+  setTimeout(function() {
+    updateContactList([room.UserName], function(err, result) {
+      if (err) return;
 
-    var illegal = null;
-    if (inviter != '你') {
-      var members = result.ContactList[0].MemberList;
-      for (var i in members) {
-        if (members[i].NickName == invitee) {
-          illegal = members[i];
-          break;
+      var inviteeList = invitees.split('、');
+      var illegals = [];
+      if (inviter != '你') {
+        var members = result.ContactList[0].MemberList;
+        for (var i in members) {
+          var m = members[i];
+          if (inviteeList.indexOf(m.NickName) >= 0) {
+            illegals.push(m);
+          }
         }
       }
-    }
 
-    if (illegal) {
-      var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
-      return wxapi.delFromChatRoom(url, _context, room.UserName, members[i].UserName, function(err, result) {
+      if (illegals.length == 0) return callback();
+
+      async.eachSeries(illegals, function(m, callback) {
+        setTimeout(function() {
+          var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
+          logger.info('删除未授权的群成员：' + m.NickName + ' [' + room.NickName + ']');
+          wxapi.delFromChatRoom(url, _context, room.UserName, m.UserName, function(err, result) {
+            console.log(result);
+            return callback();
+          });
+        }, 5000);
+      }, function(err) {
         var url = wxUrl(null, WXAPI_SEND_MSG);
-        var msg = '[警告]: ' + inviter + ' 未经授权邀请 ' + invitee + ' 入群，已经处理！';
+        var msg = '[警告]: ' + inviter + ' 未经授权邀请 ' + invitees + ' 入群，已经处理！';
         logger.info(msg);
-        wxapi.sendMsg(url, _context, room.UserName, msg, callback);
+        wxapi.sendMsg(url, _context, room.UserName, msg, function(err, result){
+        });
       });
-    }
+    });
+  }, 10000);
 
-    return callback();
-  });
+  return callback();
 };
 
 var systemMsgDispatcher = function(sourceUserName, content, callback) {
@@ -460,7 +472,7 @@ var syncUpdate = function(callback) {
   var url = wxUrl(null, WXAPI_SYNC_CHECK);
   wxapi.syncCheck(url, _context, _tick, function(err, result) {
     _tick += 1;
-    
+
     if (err) {
       return callback(null, null);
     }
