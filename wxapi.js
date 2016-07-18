@@ -3,16 +3,23 @@
 var request = require('request');
 var parser = require('xml2json');
 var fs = require('fs');
-var httper = require('./httper');
+var async = require('async')
 
-var getDeviceId = function() {
-  return "e" + ("" + Math.random().toFixed(15)).substring(2, 17);
+var httper = require('./httper');
+var logger = require('./logger')('./applog.json');
+
+const WXAPI_JSLOGIN = 'https://login.wx.qq.com/jslogin';
+const WXAPI_LOGIN_REDIRECT = 'https://web.weixin.qq.com/cgi-bin/mmwebwx-bin/webwxnewloginpage';
+const WXAPI_QR = 'https://login.weixin.qq.com/qrcode/';
+const WXAPI_LOGIN = 'https://login.wx.qq.com/cgi-bin/mmwebwx-bin/login';
+
+function webwx(entry) {
+  this.entry = entry;
 };
 
-var getFormateSyncKey = function(keys) {
-  for (var e = keys.List, t = [], o = 0, n = e.length; n > o; o++)
-  t.push(e[o].Key + "_" + e[o].Val);
-  return t.join("|")
+webwx.prototype.onQR = function(e) {
+  this.cbQR = e;
+  return this;
 };
 
 var getAppJsUrl = function(entryUrl, callback) {
@@ -25,8 +32,6 @@ var getAppJsUrl = function(entryUrl, callback) {
   });
 };
 
-exports.getAppJsUrl = getAppJsUrl;
-
 var getAppId = function(url, callback) {
   httper.get(url, null, null, function(err, data) {
     if (err) return callback(err);
@@ -36,8 +41,6 @@ var getAppId = function(url, callback) {
     return callback(null, appId);
   });
 };
-
-exports.getAppId = getAppId;
 
 var jsLogin = function(serviceUrl, redirectUrl, appId, callback) {
   var qs = {
@@ -65,7 +68,57 @@ var jsLogin = function(serviceUrl, redirectUrl, appId, callback) {
   });
 };
 
-exports.jsLogin = jsLogin;
+webwx.prototype.start = function(callback) {
+  var url = this.entry;
+  var cbQR = this.cbQR;
+  async.waterfall([
+    function(callback) {
+      logger.debug('打开微信Web首页: ' + url);
+      logger.info('尝试获取微信核心js模块地址...');
+
+      getAppJsUrl(url, function(err, jsUrl) {
+        if (err) return callback(err);
+
+        logger.debug('核心js模块地址: ' + jsUrl);
+        return callback(null, jsUrl);
+      });
+    },
+    function(jsUrl, callback) {
+      logger.info('开始下载核心js模块...');
+
+      getAppId(jsUrl, function(err, appId) {
+        if (err) return callback(err);
+
+        logger.debug('成功解析AppId: ' + appId);
+        return callback(null, appId);
+      });
+    },
+    function(appId, callback) {
+      logger.info('尝试连接js登录服务，获取二维码...');
+
+      jsLogin(WXAPI_JSLOGIN, WXAPI_LOGIN_REDIRECT, appId, function(err, result) {
+        if (err) return callback(err);
+
+        logger.debug('解析出二维码识别号: ' + result.qrcode);
+        return cbQR(WXAPI_QR + result.qrcode, callback);
+      });
+    },
+  ], function(err, result) {
+    return callback(err, result);
+  });
+};
+
+module.exports = webwx;
+
+var getDeviceId = function() {
+  return "e" + ("" + Math.random().toFixed(15)).substring(2, 17);
+};
+
+var getFormateSyncKey = function(keys) {
+  for (var e = keys.List, t = [], o = 0, n = e.length; n > o; o++)
+  t.push(e[o].Key + "_" + e[o].Val);
+  return t.join("|")
+};
 
 var downloadQRImage = function(serviceUrl, code, filename, callback) {
   var url = serviceUrl + code;
