@@ -26,8 +26,17 @@ var getAppJsUrl = function(entryUrl, callback) {
   httper.get(entryUrl, null, null, function(err, data) {
     if (err) return callback(err);
 
+    var appUrl = null;
     var re = /(https:\/\/res.wx.qq.com\/zh_CN\/htmledition\/v2\/js\/webwx.*\.js)/;
-    var appUrl = data.match(re)[1];
+    var matches = data.match(re);
+    matches && matches.length > 1 && (appUrl = matches[1]);
+
+    if (!appUrl) {
+      return callback(
+        new Error('无法从返回页代码中解析出核心js模块地址！')
+      );
+    }
+
     return callback(null, appUrl);
   });
 };
@@ -68,15 +77,13 @@ var jsLogin = function(serviceUrl, redirectUrl, appId, callback) {
   });
 };
 
-webwx.prototype.start = function(callback) {
-  var url = this.entry;
-  var cbQR = this.cbQR;
+var doLogin = function(entry, qrCallback, callback) {
   async.waterfall([
     function(callback) {
-      logger.debug('打开微信Web首页: ' + url);
+      logger.debug('打开微信Web首页: ' + entry);
       logger.info('尝试获取微信核心js模块地址...');
 
-      getAppJsUrl(url, function(err, jsUrl) {
+      getAppJsUrl(entry, function(err, jsUrl) {
         if (err) return callback(err);
 
         logger.debug('核心js模块地址: ' + jsUrl);
@@ -100,12 +107,17 @@ webwx.prototype.start = function(callback) {
         if (err) return callback(err);
 
         logger.debug('解析出二维码识别号: ' + result.qrcode);
-        return cbQR(WXAPI_QR + result.qrcode, callback);
+        qrCallback(WXAPI_QR + result.qrcode);
+        return callback(null, result.qrcode);
       });
     },
   ], function(err, result) {
     return callback(err, result);
   });
+};
+
+webwx.prototype.start = function(callback) {
+  return doLogin(this.entry, this.cbQR, callback);
 };
 
 module.exports = webwx;
