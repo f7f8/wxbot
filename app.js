@@ -396,7 +396,7 @@ var onChatRoomInviting = function(room, inviter, invitees, callback) {
         }
       }
 
-      if (illegals.length == 0) return callback();
+      if (illegals.length == 0) return;
 
       var url = wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
       wxapi.delFromChatRoom(url, _context, room.UserName, illegals.join(','), function(err, result) {
