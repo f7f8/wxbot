@@ -4,6 +4,7 @@ var request = require('request');
 var parser = require('xml2json');
 var fs = require('fs');
 var async = require('async')
+const url = require('url');
 
 var httper = require('./httper');
 var logger = require('./logger')('./applog.json');
@@ -13,13 +14,194 @@ const WXAPI_LOGIN_REDIRECT = 'https://web.weixin.qq.com/cgi-bin/mmwebwx-bin/webw
 const WXAPI_QR = 'https://login.weixin.qq.com/qrcode/';
 const WXAPI_LOGIN = 'https://login.wx.qq.com/cgi-bin/mmwebwx-bin/login';
 
+const WXAPI_INIT              = '/cgi-bin/mmwebwx-bin/webwxinit';
+const WXAPI_GET_CONTACTS      = '/cgi-bin/mmwebwx-bin/webwxgetcontact';
+const WXAPI_STATUS_NOTIFY     = '/cgi-bin/mmwebwx-bin/webwxstatusnotify';
+const WXAPI_BATCH_GET_CONTACT = '/cgi-bin/mmwebwx-bin/webwxbatchgetcontact';
+const WXAPI_SYNC_CHECK        = '/cgi-bin/mmwebwx-bin/synccheck';
+const WXAPI_WEB_SYNC          = '/cgi-bin/mmwebwx-bin/webwxsync';
+const WXAPI_VERIFY_USER       = '/cgi-bin/mmwebwx-bin/webwxverifyuser';
+const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
+const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
+const WXAPI_UPDATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxupdatechatroom';
+
 function webwx(entry) {
   this.entry = entry;
+  this.logined = false;
+  this.preloaded = false;
+  this.tick = (new Date()).getTime();
+  this.context = {};
+  this.contacts = {};
 };
 
 webwx.prototype.onQR = function(e) {
   this.cbQR = e;
   return this;
+};
+
+webwx.prototype.onPreloaded = function(e) {
+  this.cbPreloaded = e;
+  return this;
+};
+
+webwx.prototype.onUpdate = function(e) {
+  this.cbUpdate = e;
+  return this;
+};
+
+webwx.prototype.onNewContact = function(e) {
+  this.cbNewContact = e;
+  return this;
+};
+
+webwx.prototype.onFMessage = function(e) {
+  this.cbFMessage = e;
+  return this;
+};
+
+webwx.prototype.onSysMessage = function(e) {
+  this.cbSysMessage = e;
+  return this;
+};
+
+webwx.prototype.onMessage = function(e) {
+  this.cbMessage = e;
+  return this;
+};
+
+webwx.prototype.wxUrl = function(subdomain, path) {
+  return this.wxBaseUrl.protocol + '//' +
+    (subdomain ? subdomain + '.' : '') + this.wxBaseUrl.hostname + path;
+};
+
+var isRoomContact = function(e) {
+  return e ? /^@@|@chatroom$/.test(e) : !1;
+};
+
+webwx.prototype.isMyRoom = function(e) {
+  return e.OwnerUin == this.context.User.Uin || 
+    e.ChatRoomOwner == this.context.User.UserName;
+};
+
+var batchGetContact = function(url, context, list, type, callback) {
+  var qs = {
+    type: type,
+    r: (new Date()).getTime()
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.wxuin,
+      Sid: context.wxsid,
+      Skey: context.skey,
+      DeviceID: getDeviceId()
+    },
+    Count: list.length,
+    List: [],
+  };
+
+  for (var i in list) {
+    body.List.push({UserName: list[i], EncryChatRoomId: ''});
+  }
+
+  return httper.post(url, headers, qs, body, callback);
+};
+
+var rmdir = function(dirPath) {
+  try { var files = fs.readdirSync(dirPath); }
+  catch(e) { return; }
+  if (files.length > 0)
+    for (var i = 0; i < files.length; i++) {
+      var filePath = dirPath + '/' + files[i];
+      if (fs.statSync(filePath).isFile())
+        fs.unlinkSync(filePath);
+      else
+        rmDir(filePath);
+    }
+    fs.rmdirSync(dirPath);
+};
+
+var rm = function(path) {
+  try {
+    if (fs.statSync(path).isFile())
+      fs.unlinkSync(path);
+  } catch(e) {
+    if (e.code != 'ENOENT') throw e;
+  }
+};
+
+webwx.prototype.enableLog = function(path) {
+  this.log_path = path;
+
+  try {
+    rm(this.log_path + '/applog.json');
+    rm(this.log_path + '/contact.json');
+    rm(this.log_path + '/context.json');
+    rm(this.log_path + '/incoming.log');
+    fs.mkdirSync(this.log_path);
+  } catch(e) {
+    if (e.code != 'EEXIST') throw e;
+  }
+};
+
+webwx.prototype.dumpContext = function() {
+    fs.writeFileSync(
+      this.log_path + '/context.json',
+      JSON.stringify(this.context, null, 2),
+      'utf8'
+    );
+};
+
+webwx.prototype.dumpContacts = function() {
+    fs.writeFileSync(
+      this.log_path + '/contact.json',
+      JSON.stringify(this.contacts, null, 2),
+      'utf8'
+    );
+};
+
+webwx.prototype.addContact = function(e) {
+  if (!(e.UserName in this.contacts)) return this.contacts[e.UserName] = e;
+
+  for (var n in e) {
+    this.contacts[e.UserName][n] = e[n];
+  }
+};
+
+webwx.prototype.findRoomByNick = function(e) {
+  for (var id in this.contacts) {
+    var c = this.contacts[id];
+    if (isRoomContact(c.UserName) && c.NickName == e) return c;
+  }
+
+  return null;
+};
+
+webwx.prototype.updateContactList = function(idList, callback) {
+  var self = this;
+  var url = this.wxUrl(null, WXAPI_BATCH_GET_CONTACT );
+  batchGetContact(url, this.context, idList, 'ex', function(err, result) {
+    if (err) return callback(err);
+
+    var list = result.ContactList;
+    for (var i in list) {
+      self.addContact(list[i]);
+
+      var member = list[i];
+      if (isRoomContact(member.UserName) && self.isMyRoom(member)) {
+        //this.updateRoom(member, false);
+      }
+    }
+
+    logger.debug('共更新了 ' + list.length + ' 个联系人资料！');
+    self.dumpContacts();
+    return callback(null, result);
+  });
 };
 
 var getAppJsUrl = function(entryUrl, callback) {
@@ -116,8 +298,389 @@ var doLogin = function(entry, qrCallback, callback) {
   });
 };
 
+var getLoginResult = function(loginGate, qrCode, tick, callback) {
+  var headers = {
+    Accept: '*/*'
+  };
+
+  // 用这种方式构成URL，为了解决qrCode是BASE64编码时，
+  // 末尾可能出现“==”时被重新编码的问题。
+  var url = loginGate + '?loginicon=true&';
+  url += 'uuid=' + qrCode + '&tip=0&';
+  url += 'r=' + ~new Date + '&';
+  url += '_=' + tick;
+
+  httper.get(url, headers, null, function(err, data) {
+    if (err) return callback(err);
+
+    var re = /window\.code\=([0-9]+);/;
+    var matches = data.match(re);
+    if (null == matches || matches.length < 2) {
+      return callback(
+        new Error('无法从返回页代码中解析出登录状态码！')
+      );
+    }
+
+    var result = {
+      code: parseInt(matches[1])
+    };
+
+    if (result.code == 200) {
+      re = /window\.redirect_uri\=\"(.+)\";$/;
+      result.redirectUrl = data.match(re)[1];
+    }
+
+    return callback(null, result);
+  });
+};
+
+webwx.prototype.waitForScanning = function(callback) {
+  getLoginResult(WXAPI_LOGIN, this.qrcode, this.tick, function(err, result) {
+    this.tick += 1;
+    if (err) return callback();
+
+    if (result.code == 201) {
+      logger.info('用户已经扫码，等待确认...');
+    } else if (result.code == 200) {
+      logger.debug('扫码确认完成，跳转至：' + result.redirectUrl);
+      return callback(null, result.redirectUrl);
+    } else if (result.code == 400) {
+      return callback(new Error('等待扫码超时！'));
+    } else {
+      logger.debug('等待用户扫码，状态：' + result.code);
+    }
+
+    return callback();
+  }.bind(this));
+};
+
+webwx.prototype.preload = function(callback) {
+  var self = this;
+  async.waterfall([
+    function(callback) {
+      logger.info('开始跳转...');
+      loginRedirect(self.loginedRedirect, function(err, result) {
+        if (err) return callback(err);
+
+        self.context.wxuin = result.wxuin;
+        self.context.wxsid = result.wxsid;
+        self.context.skey = result.skey;
+        self.context.passTicket = result.pass_ticket;
+
+        logger.info('读取到关键登录授权信息！');
+        return callback(null);
+      });
+    },
+    function(callback) {
+      logger.info('开始读取用户基本信息...');
+      var url = self.wxUrl(null, WXAPI_INIT);
+      var context = self.context;
+      webInit(url, context.wxuin, context.wxsid, function(err, result) {
+        if (err) return callback(err);
+
+        context.User = result.User;
+        context.SyncKey = result.SyncKey;
+        context.ChatSet = result.ChatSet.split(',');
+
+        logger.debug('读取到用户【' + result.User.NickName + '】的基本信息！');
+
+        if (self.log_path) {
+          fs.writeFileSync(
+            self.log_path + '/incoming.log',
+            ''
+          );
+          self.dumpContext();
+        }
+        return callback();
+      });
+    },
+    function(callback) {
+      logger.info('切换用户至在线状态...');
+      var url = self.wxUrl(null, WXAPI_STATUS_NOTIFY);
+      statusNotify(url, self.context, function(err, result) {
+        if (err) return callback(err);
+
+        return callback();
+      });
+    },
+    function(callback) {
+      logger.info('获取联系人信息...');
+      var url = self.wxUrl(null, WXAPI_GET_CONTACTS);
+      getContacts(url, self.context, function(err, result) {
+        if (err) return callback(err);
+
+        var members = result.MemberList;
+        for (var i in members) {
+          var member = members[i];
+          self.addContact(member);
+
+          if (isRoomContact(member.UserName) && self.isMyRoom(member)) {
+            //updateRoom(member, false);
+          }
+
+          //if (members[i].NickName == _dummy_name) {
+          //  _dummy = member.UserName;
+          //}
+        }
+
+        logger.debug('共发现 ' + result.MemberCount + ' 个联系人');
+
+        self.dumpContacts();
+        return callback();
+      });
+    },
+    function(callback) {
+      logger.info('更新最近互动联系人资料...');
+      return self.updateContactList(self.context.ChatSet, callback);
+    }
+  ], function(err, qrcode) {
+    if (err) return callback(err);
+    return callback(null, 'ok');
+  });
+
+};
+
+var syncCheck = function(url, context, tick, callback) {
+  var qs = {
+    r: (new Date()).getTime(),
+    skey: context.skey,
+    sid: context.wxsid,
+    uin: context.wxuin,
+    deviceid: getDeviceId(),
+    synckey: getFormateSyncKey(context.SyncKey),
+    _: tick
+  };
+
+  var headers = {
+    Accept: '*/*'
+  };
+
+  httper.get(url, headers, qs, function(err, data) {
+    if (err) return callback(err);
+
+    var re = /\{retcode\:\"([0-9]+)\",selector\:\"([0-9]+)\"\}/;
+    var result = {
+      retcode: parseInt(data.match(re)[1]),
+      selector: parseInt(data.match(re)[2])
+    };
+
+    return callback(null, result);
+  });
+};
+
+var webSync = function(url, context, callback) {
+  var qs = {
+    sid: context.wxsid,
+    skey: context.skey
+  };
+
+  var headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
+  };
+
+  var body = {
+    BaseRequest: {
+      Uin: context.wxuin,
+      Sid: context.wxsid,
+      Skey: context.skey,
+      DeviceID: getDeviceId()
+    },
+    SyncKey: context.SyncKey,
+    rr: ~new Date
+  };
+
+  httper.post(url, headers, qs, body, callback);
+};
+
+var syncUpdate = function(self, callback) {
+  logger.info('💓 💓 💓 💓 💓 💓  ' + self.tick);
+  var url = self.wxUrl(null, WXAPI_SYNC_CHECK);
+  syncCheck(url, self.context, self.tick, function(err, result) {
+    self.tick += 1;
+
+    if (err) {
+      return callback(null, null);
+    }
+
+    if (result.retcode != 0) {
+      return callback(new Error('心跳同步中断！'));
+    }
+
+    if (result.selector > 0) {
+      logger.debug('本轮共有 ' + result.selector + ' 条新消息, 立即拉取！')
+      var url = self.wxUrl(null, WXAPI_WEB_SYNC);
+      return webSync(url, self.context, function(err, result) {
+        self.context.SyncKey = result.SyncKey;
+        return callback(null, self, result);
+      });
+    }
+
+    return callback(null, self, null);
+  });
+};
+
+webwx.prototype.onContactDel = function(entry, callback) {
+  if (entry.UserName in this.contacts) {
+    logger.debug('好友 <' + this.contacts[entry.UserName].NickName + '> 已经删除！');
+    delete this.contacts[entry.UserName];
+  }
+  return callback();
+};
+
+webwx.prototype.onContactMod = function(entry, callback) {
+  var exists = (entry.UserName in this.contacts);
+  this.addContact(entry);
+  if (exists) {
+    logger.debug('好友 <' + entry.NickName + '> 资料已经更新！');
+    return callback();
+  } else {
+    if (isRoomContact(entry.UserName)) {
+      logger.debug('群 <' + entry.NickName + '> 资料已经更新！');
+      if (this.isMyRoom(entry)) {
+        //updateRoom(entry, false);
+      }
+      return callback();
+    } else {
+      this.cbNewContact && this.cbNewContact(entry);
+    }
+
+    logger.debug('新增好友 <' + entry.NickName + '>！');
+    return callback();
+  }
+};
+
+webwx.prototype.processMsg = function(msg, callback) {
+  var sender = this.contacts[msg.FromUserName];
+  if (!sender && this.context.User.UserName == msg.FromUserName) {
+    sender = this.context.User;
+  }
+
+  logger.debug('---------------------------------------------------');
+  logger.debug('> ' + msg.MsgType);
+  logger.debug('> ' + sender.NickName + ": " + httper.htmlDecode(msg.Content));
+  logger.debug('---------------------------------------------------');
+  logger.debug('');
+
+  if (msg.FromUserName == 'fmessage') {
+    if (this.cbFMessage) return this.cbFMessage(msg, callback);
+    return callback();
+  } else if (msg.MsgType == 10000) {
+    if (this.cbSysMessage) return this.cbSysMessage(msg, callback);
+    return callback();
+  } else if (msg.MsgType == 1) {
+    if (this.cbMessage) return this.cbMessage(msg, callback);
+    return callback();
+  }
+
+  return callback();
+};
+
+var aiUpdate = function(self, incoming, callback) {
+  if (incoming == null)
+    return callback();
+
+  fs.appendFileSync(
+    self.log_path + '/incoming.log',
+    JSON.stringify(incoming, null, 2) + '\n\n'
+  );
+
+  async.waterfall([
+    function(callback) {
+      async.each(incoming.DelContactList, function(entry, callback) {
+        return self.onContactDel(entry, callback);
+      }, function(err) {
+        if (err) return callback(err);
+        return callback();
+      });
+    },
+    function(callback) {
+      async.each(incoming.ModContactList, function(entry, callback) {
+        return self.onContactMod(entry, callback);
+      }, function(err) {
+        if (err) return callback(err);
+        return callback();
+      });
+    },
+    function(callback) {
+      async.each(incoming.AddMsgList, function(msg, callback) {
+        return self.processMsg(msg, callback);
+      }, function(err) {
+        if (err) return callback(err);
+        return callback();
+      });
+    }
+  ], function(err, result) {
+    self.dumpContacts();
+    return callback(err, result);
+  });
+};
+
+webwx.prototype.mainLoop = function() {
+  var updateCallback = function() {
+    if (!this.cbUpdate) {
+      return setTimeout(function() {this.mainLoop();}.bind(this), 100);
+    }
+
+    this.cbUpdate(function(err, result) {
+      if (!err) {
+        return setTimeout(function() {this.mainLoop();}.bind(this), 100);
+      }
+    }.bind(this));
+  };
+
+  if (!this.logined) {
+    return this.waitForScanning(function(err, result) {
+      if (err) {
+        logger.error('等待扫码过程发生未知错误，具体如下：');
+        return logger.error(err);
+      }
+
+      if (result) {
+        this.logined = true;
+        this.loginedRedirect = result;
+        this.wxBaseUrl = url.parse(result);
+      }
+
+      return setTimeout(function() {this.mainLoop();}.bind(this), 100);
+    }.bind(this));
+  }
+
+  if (!this.preloaded) {
+    return this.preload(function(err, result) {
+      if (err) {
+        logger.error('加载用户基本信息过程发生未知错误，具体如下：');
+        return logger.error(err);
+      }
+
+      if (result) {
+        this.preloaded = true;
+        this.cbPreloaded && this.cbPreloaded();
+      }
+
+      return setTimeout(function() {this.mainLoop();}.bind(this), 100);
+    }.bind(this));
+  }
+
+  async.waterfall([
+    async.apply(syncUpdate, this),
+    aiUpdate
+  ], function(err, result) {
+    if (err) {
+      logger.error('消息循环处理过程出现未知错误，具体如下：');
+      return logger.error(err);
+    }
+
+    updateCallback.bind(this)();
+  }.bind(this));
+};
+
 webwx.prototype.start = function(callback) {
-  return doLogin(this.entry, this.cbQR, callback);
+  doLogin(this.entry, this.cbQR, function(err, result) {
+    if (err) return callback(err);
+    this.qrcode = result;
+    this.mainLoop();
+  }.bind(this));
 };
 
 module.exports = webwx;
@@ -161,44 +724,6 @@ var downloadQRImage = function(serviceUrl, code, filename, callback) {
 };
 
 exports.downloadQRImage = downloadQRImage;
-
-var getLoginResult = function(loginGate, qrCode, tick, callback) {
-  var headers = {
-    Accept: '*/*'
-  };
-
-  // 用这种方式构成URL，为了解决qrCode是BASE64编码时，
-  // 末尾可能出现“==”时被重新编码的问题。
-  var url = loginGate + '?loginicon=true&';
-  url += 'uuid=' + qrCode + '&tip=0&';
-  url += 'r=' + ~new Date + '&';
-  url += '_=' + tick;
-
-  httper.get(url, headers, null, function(err, data) {
-    if (err) return callback(err);
-
-    var re = /window\.code\=([0-9]+);/;
-    var matches = data.match(re);
-    if (null == matches || matches.length < 2) {
-      return callback(
-        new Error('无法从返回页代码中解析出登录状态码！')
-      );
-    }
-
-    var result = {
-      code: parseInt(matches[1])
-    };
-
-    if (result.code == 200) {
-      re = /window\.redirect_uri\=\"(.+)\";$/;
-      result.redirectUrl = data.match(re)[1];
-    }
-
-    return callback(null, result);
-  });
-};
-
-exports.getLoginResult = getLoginResult;
 
 var loginRedirect = function(url, callback) {
   var v2Url = url + '&fun=new&version=v2';
@@ -288,95 +813,9 @@ var getContacts = function(url, context, callback) {
 
 exports.getContacts = getContacts;
 
-var batchGetContact = function(url, context, list, type, callback) {
-  var qs = {
-    type: type,
-    r: (new Date()).getTime()
-  };
-
-  var headers = {
-    'Accept': 'application/json, text/plain, */*',
-    'Content-Type': 'application/json;charset=UTF-8'
-  };
-
-  var body = {
-    BaseRequest: {
-      Uin: context.wxuin,
-      Sid: context.wxsid,
-      Skey: context.skey,
-      DeviceID: getDeviceId()
-    },
-    Count: list.length,
-    List: [],
-  };
-
-  for (var i in list) {
-    body.List.push({UserName: list[i], EncryChatRoomId: ''});
-  }
-
-  return httper.post(url, headers, qs, body, callback);
-};
-
-exports.batchGetContact = batchGetContact;
-
-var syncCheck = function(url, context, tick, callback) {
-  var qs = {
-    r: (new Date()).getTime(),
-    skey: context.skey,
-    sid: context.wxsid,
-    uin: context.wxuin,
-    deviceid: getDeviceId(),
-    synckey: getFormateSyncKey(context.SyncKey),
-    _: tick
-  };
-
-  var headers = {
-    Accept: '*/*'
-  };
-
-  httper.get(url, headers, qs, function(err, data) {
-    if (err) return callback(err);
-
-    var re = /\{retcode\:\"([0-9]+)\",selector\:\"([0-9]+)\"\}/;
-    var result = {
-      retcode: parseInt(data.match(re)[1]),
-      selector: parseInt(data.match(re)[2])
-    };
-
-    return callback(null, result);
-  });
-};
-
-exports.syncCheck = syncCheck;
-
-var webSync = function(url, context, callback) {
-  var qs = {
-    sid: context.wxsid,
-    skey: context.skey
-  };
-
-  var headers = {
-    'Accept': 'application/json, text/plain, */*',
-    'Content-Type': 'application/json;charset=UTF-8'
-  };
-
-  var body = {
-    BaseRequest: {
-      Uin: context.wxuin,
-      Sid: context.wxsid,
-      Skey: context.skey,
-      DeviceID: getDeviceId()
-    },
-    SyncKey: context.SyncKey,
-    rr: ~new Date
-  };
-
-  httper.post(url, headers, qs, body, callback);
-};
-
-exports.webSync = webSync;
-
-var verifyUser = function(url, context, username, ticket, callback) {
+webwx.prototype.verifyUser = function(username, ticket, callback) {
+  var url = this.wxUrl(null, WXAPI_VERIFY_USER);
+  var context = this.context;
   var qs = {
     r: ~new Date
   };
@@ -411,9 +850,9 @@ var verifyUser = function(url, context, username, ticket, callback) {
   return httper.post(url, headers, qs, body, callback);
 };
 
-exports.verifyUser = verifyUser;
-
-var sendMsg = function(url, context, receiver, content, callback) {
+webwx.prototype.sendMsg = function(receiver, content, callback) {
+  var url = this.wxUrl(null, WXAPI_SEND_MSG);
+  var context = this.context;
   var headers = {
     'Accept': 'application/json, text/plain, */*',
     'Content-Type': 'application/json;charset=UTF-8'
@@ -442,9 +881,9 @@ var sendMsg = function(url, context, receiver, content, callback) {
   return httper.post(url, headers, null, body, callback);
 };
 
-exports.sendMsg = sendMsg;
-
-var createChatRoom = function(url, context, topic, members, callback) {
+webwx.prototype.createChatRoom = function(topic, members, callback) {
+  var url = this.wxUrl(null, WXAPI_CREATE_CHAT_ROOM);
+  var context = this.context;
   var qs = {
     r: (new Date()).getTime()
   };
@@ -473,8 +912,6 @@ var createChatRoom = function(url, context, topic, members, callback) {
   return httper.post(url, headers, qs, body, callback);
 };
 
-exports.createChatRoom = createChatRoom;
-
 var addToChatRoom = function(url, context, room, member, callback) {
   var qs = {
     fun: 'addmember'
@@ -501,7 +938,10 @@ var addToChatRoom = function(url, context, room, member, callback) {
 
 exports.addToChatRoom = addToChatRoom;
 
-var delFromChatRoom = function(url, context, room, member, callback) {
+webwx.prototype.delFromChatRoom = function(room, member, callback) {
+  var url = this.wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
+  var context = this.context;
+
   var qs = {
     fun: 'delmember'
   };
@@ -524,5 +964,3 @@ var delFromChatRoom = function(url, context, room, member, callback) {
 
   return httper.post(url, headers, qs, body, callback);
 };
-
-exports.delFromChatRoom = delFromChatRoom;

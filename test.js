@@ -37,9 +37,12 @@ var downloadQR = function(url, filename) {
 const ENTRY_URL = 'https://web.weixin.qq.com/';
 var client = new webwx(ENTRY_URL);
 
+client.enableLog('./log/test');
+
 client.onQR(function(imgUrl, callback) {
   logger.debug('下载二维码：' + imgUrl);
   return downloadQR(imgUrl, 'qrs/qr.jpg', callback);
+}).onMessages(function(msgs, callback) {
 }).start(function(err, result) {
   if (err) {
     return logger.error(err);
