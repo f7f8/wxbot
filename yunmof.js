@@ -5,8 +5,8 @@ var parser = require('xml2json');
 var fs = require('fs');
 var httper = require('./httper');
 
-const API_BASE          = 'http://qun.test.yunmof.com/wxbot/';
-const API_GET_QUEUE     = 'http://qun.test.yunmof.com/wxbot/queue';
+const API_BASE          = 'http://qun.yunmof.com/wxbot/';
+const API_GET_QUEUE     = 'http://qun.yunmof.com/wxbot/queue';
 
 var getQueue = function(callback) {
   httper.get(API_GET_QUEUE, null, null, function(err, data) {

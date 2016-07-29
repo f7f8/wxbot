@@ -70,6 +70,7 @@ var createQun = function(wx, topic, callback) {
 
   wx.createChatRoom(topic, members, function(err, result) {
     if (err) return callback(err);
+    console.log(result);
     if (result.Topic.length <= 0) {
       return callback(
         new Error('建群失败：\n' + result.BaseResponse.ErrMsg)
@@ -97,7 +98,7 @@ var autoCreateQun = function(wx, callback) {
       return callback();
     }
     
-    
+   /* 
     if (r.members.length > 0) {
       if (exists) {
         roomContact = exists.UserName;
@@ -110,6 +111,7 @@ var autoCreateQun = function(wx, callback) {
       rs = null;
       return yunmof.updateInfo(ownerId, newName, callback);
     }
+   */
 
     return createQun(wx, r.name, callback);
   });
@@ -188,12 +190,11 @@ var onChatRoomInviting = function(wx, room, inviter, invitees, callback) {
         var msg = '[警告]: ' + inviter + ' 未经授权邀请 ' + invitees + ' 入群，已经处理！';
         logger.info(msg);
         wx.sendMsg(room.UserName, msg, function(err, result){
+          return callback();
         });
       });
     });
   }, 5000);
-
-  return callback();
 };
 
 var processSysMsg = function(wx, sourceUserName, content, callback) {

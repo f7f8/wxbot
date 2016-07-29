@@ -459,9 +459,15 @@ var syncCheck = function(url, context, tick, callback) {
     if (err) return callback(err);
 
     var re = /\{retcode\:\"([0-9]+)\",selector\:\"([0-9]+)\"\}/;
+    var matches = data.match(re);
+
+    if (!matches || matches.length <= 0) {
+      return callback(new Error(data.toString()));
+    }
+
     var result = {
-      retcode: parseInt(data.match(re)[1]),
-      selector: parseInt(data.match(re)[2])
+      retcode: parseInt(matches[1]),
+      selector: parseInt(matches[2])
     };
 
     return callback(null, result);
@@ -500,7 +506,7 @@ var syncUpdate = function(self, callback) {
     self.tick += 1;
 
     if (err) {
-      return callback(null, null);
+      return callback(null, self, null);
     }
 
     if (result.retcode != 0) {
@@ -511,7 +517,7 @@ var syncUpdate = function(self, callback) {
       logger.debug('本轮共有 ' + result.selector + ' 条新消息, 立即拉取！')
       var url = self.wxUrl(null, WXAPI_WEB_SYNC);
       return webSync(url, self.context, function(err, result) {
-        if (err) {
+        if (err || !result) {
           return callback(null, self, null);
         }
 
