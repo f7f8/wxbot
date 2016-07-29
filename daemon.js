@@ -11,13 +11,20 @@ var createBot = function(ownerId) {
 
     console.log(stdout);
     console.log(stderr);
+  }).on('error', function(err) {
+    console.log('子进程 [' + ownerId + '] 出错：' + code);
+    delete bots[ownerId];
+  }).on('exit', function(code) {
+    console.log('子进程 [' + ownerId + '] 退出 ' + code);
+    delete bots[ownerId];
   });
 };
 
 var daemonProc = function() {
   yunmof.getQueue(function(err, result) {
     if (err) {
-      return console.log(err);
+      console.log('守护进程出现异常:\n' + err);
+      return setTimeout(daemonProc, 1000 * 15);
     }
 
     var queue = result.get_queue_response;
