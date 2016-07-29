@@ -13,7 +13,7 @@ if (process.argv.length <= 2) {
 }
 
 var ownerId = process.argv[2];
-var room = null;
+var rs = null;
 var roomContact = null;
 var dpath = './log/' + ownerId;
 
@@ -22,12 +22,12 @@ var isRoomContact = function(e) {
 };
 
 var fetchRoom = function(callback) {
-  if (room) return callback(null, room);
+  if (rs) return callback(null, rs);
 
   yunmof.getInfo(ownerId, function(err, result) {
     if (err) return callback(err);
-    room = result.info_response;
-    return callback(null, room);
+    rs = result.info_response;
+    return callback(null, rs);
   });
 };
 
@@ -107,7 +107,7 @@ var autoCreateQun = function(wx, callback) {
     
     if (exists) {
       var newName = r.name + '【新】';
-      room = null;
+      rs = null;
       return yunmof.updateInfo(ownerId, newName, callback);
     }
 
@@ -165,6 +165,51 @@ var joinQun = function(wx, code, username, callback) {
   });
 };
 
+var onChatRoomInviting = function(wx, room, inviter, invitees, callback) {
+  setTimeout(function() {
+    wx.updateContactList([room.UserName], function(err, result) {
+      if (err) return;
+
+      var inviteeList = invitees.split('、');
+      var illegals = [];
+      if (inviter != '你') {
+        var members = result.ContactList[0].MemberList;
+        for (var i in members) {
+          var m = members[i];
+          if (inviteeList.indexOf(m.NickName) >= 0) {
+            illegals.push(m.UserName);
+          }
+        }
+      }
+
+      if (illegals.length == 0) return callback();
+
+      wx.delFromChatRoom(room.UserName, illegals.join(','), function(err, result) {
+        var msg = '[警告]: ' + inviter + ' 未经授权邀请 ' + invitees + ' 入群，已经处理！';
+        logger.info(msg);
+        wx.sendMsg(room.UserName, msg, function(err, result){
+        });
+      });
+    });
+  }, 5000);
+
+  return callback();
+};
+
+var processSysMsg = function(wx, sourceUserName, content, callback) {
+  if (!(sourceUserName in wx.contacts))
+    return callback(new Error('无效的系统信息来源！'));
+
+  var source = wx.contacts[sourceUserName];
+
+  var inviting = content.match(/(.+)邀请(.+)加入了群聊$/);
+  if (inviting) {
+    return onChatRoomInviting(wx, source, inviting[1], inviting[2], callback);
+  }
+
+  return callback();
+};
+
 
 client.onQR(function(imgUrl) {
   logger.debug('下载二维码：' + imgUrl);
@@ -181,8 +226,9 @@ client.onQR(function(imgUrl) {
 }).onFMessage(function(msg, callback) {
   return onStrangerInviting(client, msg, callback);
 }).onSysMessage(function(msg, callback) {
-  console.log(msg);
-  return callback();
+  var from = msg.FromUserName;
+  var content = msg.Content;
+  return processSysMsg(client, from, content, callback);
 }).onMessage(function(msg, callback) {
   var cmd = msg.Content;
   if (cmd.length == 19) {
