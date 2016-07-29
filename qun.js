@@ -1,5 +1,6 @@
 'use strict';
 var fs = require('fs');
+var async = require('async')
 var logger = require('./logger')('./applog.json');
 var webwx = require('./wxapi');
 var yunmof = require('./yunmof');
@@ -114,6 +115,57 @@ var autoCreateQun = function(wx, callback) {
   });
 };
 
+var addToChatRoom = function(wx, member, roomC, callback) {
+  async.waterfall([
+    function(callback) {
+      var msg = '令牌有效, 正在将您 <' + member.NickName + '> 加入群 <' + roomC.NickName + '>';
+      logger.debug(msg);
+  
+      return wx.sendMsg(member.UserName, msg, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    },
+    function(callback) {
+      return wx.addToChatRoom(roomC.UserName, member.UserName, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    },
+    function(callback) {
+      var msg = '热烈欢迎 <' + member.NickName + '> 加入本群！';
+      logger.debug(msg);
+  
+      return wx.sendMsg(roomC.UserName, msg, function(err, result) {
+        if (err) return callback(err);
+        callback();
+      });
+    }
+  ], function(err, result) {
+    return callback(err, result);
+  });
+};
+
+var joinQun = function(wx, code, username, callback) {
+  var member = wx.contacts[username];
+  var roomC = wx.contacts[roomContact];
+  var nickname = member.NickName;
+
+  logger.debug('用户<' + nickname + '>提交群令牌<' + code + '>，尝试入群');
+  yunmof.joinQun(ownerId, code, nickname, function(err, result) {
+    if (err) {
+      return wx.sendMsg(member.UserName, "令牌无效或已经过期！", callback);
+    }
+
+    var qunId = result.membership_join_response.qunid;
+    var qunName = result.membership_join_response.name;
+    
+    console.log(result);
+    return addToChatRoom(wx, member, roomC, callback);
+  });
+};
+
+
 client.onQR(function(imgUrl) {
   logger.debug('下载二维码：' + imgUrl);
   return yunmof.changeState(ownerId, 'offline', function(err, result) {
@@ -132,7 +184,10 @@ client.onQR(function(imgUrl) {
   console.log(msg);
   return callback();
 }).onMessage(function(msg, callback) {
-  console.log(msg);
+  var cmd = msg.Content;
+  if (cmd.length == 19) {
+    return joinQun(client, cmd, msg.FromUserName, callback);
+  }
   return callback();
 }).onUpdate(function(callback) {
   return autoCreateQun(client, callback);

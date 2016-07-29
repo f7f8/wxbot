@@ -109,3 +109,25 @@ var updateInfo = function(owner, name, callback) {
 
 exports.updateInfo = updateInfo;
 
+var joinQun = function(owner, token, nickname, callback) {
+  var url = API_BASE + owner + '/member';
+  var body = {
+    token: token,
+    nickname: nickname
+  };
+
+  httper.post(url, null, null, body, function(err, data) {
+    if (err) return callback(err);
+    
+    var result = JSON.parse(data);
+    if (result.error) {
+      return callback(
+        new Error('云魔方API返回错误：\n' + JSON.stringify(result, null, 2))
+      );
+    }
+    
+    return callback(null, result);
+  });
+};
+
+exports.joinQun = joinQun;

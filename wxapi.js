@@ -912,7 +912,9 @@ webwx.prototype.createChatRoom = function(topic, members, callback) {
   return httper.post(url, headers, qs, body, callback);
 };
 
-var addToChatRoom = function(url, context, room, member, callback) {
+webwx.prototype.addToChatRoom = function(room, member, callback) {
+  var url = this.wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
+  var context = this.context;
   var qs = {
     fun: 'addmember'
   };
@@ -935,8 +937,6 @@ var addToChatRoom = function(url, context, room, member, callback) {
 
   return httper.post(url, headers, qs, body, callback);
 };
-
-exports.addToChatRoom = addToChatRoom;
 
 webwx.prototype.delFromChatRoom = function(room, member, callback) {
   var url = this.wxUrl(null, WXAPI_UPDATE_CHAT_ROOM);
