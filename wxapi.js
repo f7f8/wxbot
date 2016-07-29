@@ -511,6 +511,10 @@ var syncUpdate = function(self, callback) {
       logger.debug('本轮共有 ' + result.selector + ' 条新消息, 立即拉取！')
       var url = self.wxUrl(null, WXAPI_WEB_SYNC);
       return webSync(url, self.context, function(err, result) {
+        if (err) {
+          return callback(null, self, null);
+        }
+
         self.context.SyncKey = result.SyncKey;
         return callback(null, self, result);
       });
@@ -633,7 +637,8 @@ webwx.prototype.mainLoop = function() {
     return this.waitForScanning(function(err, result) {
       if (err) {
         logger.error('等待扫码过程发生未知错误，具体如下：');
-        return logger.error(err);
+        logger.error(err);
+        return process.exit(-1001);
       }
 
       if (result) {
