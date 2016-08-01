@@ -510,7 +510,7 @@ var syncUpdate = function(self, callback) {
     }
 
     if (result.retcode != 0) {
-      return callback(new Error('心跳同步中断！'));
+      return callback(new Error('心跳同步中断！\n' + result.toString()));
     }
 
     if (result.selector > 0) {
