@@ -206,6 +206,8 @@ var processSysMsg = function(wx, sourceUserName, content, callback) {
   if (!(sourceUserName in wx.contacts))
     return callback(new Error('无效的系统信息来源！'));
 
+  if (roomContact != sourceUserName) return callback();
+
   var source = wx.contacts[sourceUserName];
 
   var inviting = content.match(/(.+)邀请(.+)加入了群聊$/);
