@@ -63,9 +63,7 @@ var createQun = function(wx, topic, callback) {
   for (var id in wx.contacts) {
     var c = wx.contacts[id];
     if (members.length >= 2) break;
-    if (!isRoomContact(c.UserName) && c.SnsFlag == 1) {
-      members.push(c.UserName);
-    }
+    !isRoomContact(c.UserName) && c.ContactFlag == 3 && c.VerifyFlag == 0 && members.push(c);
   }
 
   wx.createChatRoom(topic, members, function(err, result) {

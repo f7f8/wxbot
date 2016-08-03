@@ -31,7 +31,7 @@ var daemonProc = function() {
     for (var k in queue) {
       var ownerId = queue[k];
 
-      if (!(ownerId in bots)) {
+      if (!(ownerId in bots) && ownerId != 543) {
         console.log('生成新机器人 ' + ownerId);
         bots[ownerId] = {
           proc: createBot(ownerId)
