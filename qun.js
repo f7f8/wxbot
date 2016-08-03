@@ -1,7 +1,6 @@
 'use strict';
 var fs = require('fs');
 var async = require('async')
-var logger = require('./logger')('./applog.json');
 var webwx = require('./wxapi');
 var yunmof = require('./yunmof');
 
@@ -16,6 +15,7 @@ var ownerId = process.argv[2];
 var rs = null;
 var roomContact = null;
 var dpath = './log/' + ownerId;
+var logger = require('./logger')(dpath + '/applog.json');
 
 var isRoomContact = function(e) {
   return e ? /^@@|@chatroom$/.test(e) : !1;

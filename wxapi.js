@@ -25,6 +25,31 @@ const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
 const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
 const WXAPI_UPDATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxupdatechatroom';
 
+const MT = {
+  MSGTYPE_TEXT: 1,
+  MSGTYPE_IMAGE: 3,
+  MSGTYPE_VOICE: 34,
+  MSGTYPE_VIDEO: 43,
+  MSGTYPE_MICROVIDEO: 62,
+  MSGTYPE_EMOTICON: 47,
+  MSGTYPE_APP: 49,
+  MSGTYPE_VOIPMSG: 50,
+  MSGTYPE_VOIPNOTIFY: 52,
+  MSGTYPE_VOIPINVITE: 53,
+  MSGTYPE_LOCATION: 48,
+  MSGTYPE_STATUSNOTIFY: 51,
+  MSGTYPE_SYSNOTICE: 9999,
+  MSGTYPE_POSSIBLEFRIEND_MSG: 40,
+  MSGTYPE_VERIFYMSG: 37,
+  MSGTYPE_SHARECARD: 42,
+  MSGTYPE_SYS: 1e4,
+  MSGTYPE_RECALLED: 10002,
+  StatusNotifyCode_READED: 1,
+  StatusNotifyCode_ENTER_SESSION: 2,
+  StatusNotifyCode_INITED: 3,
+  StatusNotifyCode_SYNC_CONV: 4
+};
+
 function webwx(entry) {
   this.entry = entry;
   this.logined = false;
@@ -137,6 +162,7 @@ var rm = function(path) {
 
 webwx.prototype.enableLog = function(path) {
   this.log_path = path;
+  logger = require('./logger')(path + '/log.json');
 
   try {
     rm(this.log_path + '/applog.json');
@@ -560,6 +586,18 @@ webwx.prototype.onContactMod = function(entry, callback) {
   }
 };
 
+webwx.prototype.onStatusNotifySync = function(msg, callback) {
+  var o = msg.StatusNotifyUserName.split(',');
+  var s = [];
+  for (var i in o) {
+    var e = o[i];
+    isRoomContact(e) && s.push(e);
+  }
+
+  logger.warn('共收到状态通知 <' + s.length + '> 个');
+  return this.updateContactList(s, callback);
+};
+
 webwx.prototype.processMsg = function(msg, callback) {
   var sender = this.contacts[msg.FromUserName];
   if (!sender && this.context.User.UserName == msg.FromUserName) {
@@ -575,10 +613,16 @@ webwx.prototype.processMsg = function(msg, callback) {
   if (msg.FromUserName == 'fmessage') {
     if (this.cbFMessage) return this.cbFMessage(msg, callback);
     return callback();
-  } else if (msg.MsgType == 10000) {
+  } else if (msg.MsgType == MT.MSGTYPE_SYS) {
     if (this.cbSysMessage) return this.cbSysMessage(msg, callback);
     return callback();
-  } else if (msg.MsgType == 1) {
+  } else if (msg.MsgType == MT.MSGTYPE_STATUSNOTIFY) {
+    if (msg.StatusNotifyCode == MT.StatusNotifyCode_SYNC_CONV) {
+      return this.onStatusNotifySync(msg, callback);
+    }
+
+    return callback();
+  } else if (msg.MsgType == MT.MSGTYPE_TEXT) {
     if (this.cbMessage) return this.cbMessage(msg, callback);
     return callback();
   }
