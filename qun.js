@@ -15,7 +15,7 @@ var ownerId = process.argv[2];
 var rs = null;
 var roomContact = null;
 var dpath = './log/' + ownerId;
-var logger = require('./logger')(dpath + '/applog.json');
+var logger = require('./logger')(dpath + '/log.json');
 
 var isRoomContact = function(e) {
   return e ? /^@@|@chatroom$/.test(e) : !1;
