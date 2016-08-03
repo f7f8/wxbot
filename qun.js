@@ -172,7 +172,7 @@ var joinQun = function(wx, code, username, callback) {
   });
 };
 
-var onChatRoomInviting = function(wx, room, inviter, invitees, callback) {
+var onNewMemberJoined = function(wx, room, inviter, invitees, callback) {
   setTimeout(function() {
     wx.updateContactList([room.UserName], function(err, result) {
       if (err) return;
@@ -212,7 +212,12 @@ var processSysMsg = function(wx, sourceUserName, content, callback) {
 
   var inviting = content.match(/(.+)邀请(.+)加入了群聊$/);
   if (inviting) {
-    return onChatRoomInviting(wx, source, inviting[1], inviting[2], callback);
+    return onNewMemberJoined(wx, source, inviting[1], inviting[2], callback);
+  }
+
+  var sharing = content.match(/(.+)通过扫描(.+)分享的二维码加入群聊$/);
+  if (sharing) {
+    return onNewMemberJoined(wx, source, sharing[2], sharing[1], callback);
   }
 
   return callback();
