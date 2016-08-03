@@ -42,7 +42,10 @@ client.enableLog('./log/test');
 client.onQR(function(imgUrl, callback) {
   logger.debug('下载二维码：' + imgUrl);
   return downloadQR(imgUrl, 'qrs/qr.jpg', callback);
-}).onMessages(function(msgs, callback) {
+}).onPreloaded(function() {
+  logger.debug('共发现联系人: ' + client.contacts.length + ' 个');
+}).onMessage(function(msgs, callback) {
+  return callback();
 }).start(function(err, result) {
   if (err) {
     return logger.error(err);
