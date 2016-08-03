@@ -63,7 +63,14 @@ var createQun = function(wx, topic, callback) {
   for (var id in wx.contacts) {
     var c = wx.contacts[id];
     if (members.length >= 2) break;
-    !isRoomContact(c.UserName) && c.ContactFlag == 3 && c.VerifyFlag == 0 && members.push(c);
+    if (!isRoomContact(c.UserName) && c.ContactFlag == 3 && c.VerifyFlag == 0 && c.UserName[0] == '@') {
+      logger.warn('添加 <' + c.NickName + '> 到群中。。。');
+      members.push(c.UserName);
+    }
+  }
+
+  if (members.length != 2) {
+    return callback(new Error('找不到可以加入的群成员！'));
   }
 
   wx.createChatRoom(topic, members, function(err, result) {
