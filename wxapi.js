@@ -630,6 +630,14 @@ webwx.prototype.processMsg = function(msg, callback) {
     from = this.context.User;
   }
 
+  if (!from) {
+    var errMsg = JSON.stringify(msg, null, 2);
+    logger.error(errMsg);
+    return callback(
+      new Error('在联系人列表中找不到消息发送者，原始消息如下：\n' + errMsg)
+    );
+  }
+
   logger.debug('---------------------------------------------------');
   logger.debug('> [' + msg.MsgType + '] ' + from.UserName + ' (' + from.NickName + ')');
   logger.debug('> ' + httper.htmlDecode(msg.Content));
