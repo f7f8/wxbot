@@ -484,6 +484,10 @@ webwx.prototype.preload = function(callback) {
     function(callback) {
       logger.info('更新最近互动联系人资料...');
       return self.updateContactList(self.context.ChatSet, callback);
+    },
+    function(result, callback) {
+      logger.info('更新特殊联系人资料...');
+      return self.updateContactList(['fmessage'], callback);
     }
   ], function(err, qrcode) {
     if (err) return callback(err);
