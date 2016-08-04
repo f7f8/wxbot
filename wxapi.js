@@ -24,6 +24,9 @@ const WXAPI_VERIFY_USER       = '/cgi-bin/mmwebwx-bin/webwxverifyuser';
 const WXAPI_SEND_MSG          = '/cgi-bin/mmwebwx-bin/webwxsendmsg';
 const WXAPI_CREATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxcreatechatroom';
 const WXAPI_UPDATE_CHAT_ROOM  = '/cgi-bin/mmwebwx-bin/webwxupdatechatroom';
+const WXAPI_GET_VOICE         = '/cgi-bin/mmwebwx-bin/webwxgetvoice';
+const WXAPI_GET_ICON          = '/cgi-bin/mmwebwx-bin/webwxgeticon';
+const WXAPI_GET_IMAGE         = '/cgi-bin/mmwebwx-bin/webwxgetmsgimg';
 
 const MT = {
   MSGTYPE_TEXT: 1,
@@ -89,8 +92,28 @@ webwx.prototype.onSysMessage = function(e) {
   return this;
 };
 
-webwx.prototype.onMessage = function(e) {
-  this.cbMessage = e;
+webwx.prototype.onTextMessage = function(e) {
+  this.cbTextMessage = e;
+  return this;
+};
+
+webwx.prototype.onImgMessage = function(e) {
+  this.cbImgMessage = e;
+  return this;
+};
+
+webwx.prototype.onVoiceMessage = function(e) {
+  this.cbVoiceMessage = e;
+  return this;
+};
+
+webwx.prototype.onVideoMessage = function(e) {
+  this.cbVideoMessage = e;
+  return this;
+};
+
+webwx.prototype.onMicroVideoMessage = function(e) {
+  this.cbMicroVideoMessage = e;
   return this;
 };
 
@@ -170,6 +193,9 @@ webwx.prototype.enableLog = function(path) {
     rm(this.log_path + '/context.json');
     rm(this.log_path + '/incoming.log');
     fs.mkdirSync(this.log_path);
+    fs.mkdirSync(this.log_path + '/voices');
+    fs.mkdirSync(this.log_path + '/images');
+    fs.mkdirSync(this.log_path + '/headimgs');
   } catch(e) {
     if (e.code != 'EEXIST') throw e;
   }
@@ -586,7 +612,7 @@ webwx.prototype.onContactMod = function(entry, callback) {
   }
 };
 
-webwx.prototype.onStatusNotifySync = function(msg, callback) {
+webwx.prototype.onStatusNotifySync = function(from, msg, callback) {
   var o = msg.StatusNotifyUserName.split(',');
   var s = [];
   for (var i in o) {
@@ -599,31 +625,42 @@ webwx.prototype.onStatusNotifySync = function(msg, callback) {
 };
 
 webwx.prototype.processMsg = function(msg, callback) {
-  var sender = this.contacts[msg.FromUserName];
-  if (!sender && this.context.User.UserName == msg.FromUserName) {
-    sender = this.context.User;
+  var from = this.contacts[msg.FromUserName];
+  if (!from && this.context.User.UserName == msg.FromUserName) {
+    from = this.context.User;
   }
 
   logger.debug('---------------------------------------------------');
-  logger.debug('> ' + msg.MsgType);
-  logger.debug('> ' + sender.NickName + ": " + httper.htmlDecode(msg.Content));
+  logger.debug('> [' + msg.MsgType + '] ' + from.UserName + ' (' + from.NickName + ')');
+  logger.debug('> ' + httper.htmlDecode(msg.Content));
   logger.debug('---------------------------------------------------');
   logger.debug('');
 
   if (msg.FromUserName == 'fmessage') {
-    if (this.cbFMessage) return this.cbFMessage(msg, callback);
+    if (this.cbFMessage) return this.cbFMessage(from, msg, callback);
     return callback();
   } else if (msg.MsgType == MT.MSGTYPE_SYS) {
-    if (this.cbSysMessage) return this.cbSysMessage(msg, callback);
+    if (this.cbSysMessage) return this.cbSysMessage(from, msg, callback);
     return callback();
   } else if (msg.MsgType == MT.MSGTYPE_STATUSNOTIFY) {
     if (msg.StatusNotifyCode == MT.StatusNotifyCode_SYNC_CONV) {
-      return this.onStatusNotifySync(msg, callback);
+      return this.onStatusNotifySync(from, msg, callback);
     }
-
     return callback();
   } else if (msg.MsgType == MT.MSGTYPE_TEXT) {
-    if (this.cbMessage) return this.cbMessage(msg, callback);
+    if (this.cbTextMessage) return this.cbTextMessage(from, msg, callback);
+    return callback();
+  } else if (msg.MsgType == MT.MSGTYPE_IMAGE) {
+    if (this.cbImgMessage) return this.cbImgMessage(from, msg, callback);
+    return callback();
+  } else if (msg.MsgType == MT.MSGTYPE_VOICE) {
+    if (this.cbVoiceMessage) return this.cbVoiceMessage(from, msg, callback);
+    return callback();
+  } else if (msg.MsgType == MT.MSGTYPE_VIDEO) {
+    if (this.cbVideoMessage) return this.cbVideoMessage(from, msg, callback);
+    return callback();
+  } else if (msg.MsgType == MT.MSGTYPE_MICROVIDEO) {
+    if (this.cbMicroVideoMessage) return this.cbMicroVideoMessage(from, msg, callback);
     return callback();
   }
 
@@ -1018,4 +1055,45 @@ webwx.prototype.delFromChatRoom = function(room, member, callback) {
   };
 
   return httper.post(url, headers, qs, body, callback);
+};
+
+webwx.prototype.downloadVoice = function(msgId, callback) {
+  var headers = {
+    Accept: '*/*',
+    'Accept-Encoding': 'identity;q=1, *;q=0',
+    Range: 'bytes=0-'
+  };
+
+  var url = this.wxUrl(null, WXAPI_GET_VOICE);
+  url += '?msgid=' + msgId;
+  url += '&skey=' + this.context.skey;
+
+  var filename = this.log_path + '/voices/' + msgId + '.mp3';
+  httper.stream(url, headers, null, filename, callback);
+};
+
+webwx.prototype.downloadIcon = function(username, callback) {
+  var headers = {
+    Accept: 'image/webp,image/*,*/*;q=0.8'
+  };
+
+  var url = this.wxUrl(null, WXAPI_GET_ICON);
+  url += '?seq=0&username=' + username;
+  url += '&skey=' + this.context.skey;
+
+  var filename = this.log_path + '/headimgs/' + username + '.jpg';
+  httper.stream(url, headers, null, filename, callback);
+};
+
+webwx.prototype.downloadImage = function(msgId, callback) {
+  var headers = {
+    Accept: 'image/webp,image/*,*/*;q=0.8'
+  };
+
+  var url = this.wxUrl(null, WXAPI_GET_IMAGE);
+  url += '?MsgID=' + msgId;
+  url += '&skey=' + this.context.skey;
+
+  var filename = this.log_path + '/images/' + msgId + '.jpg';
+  httper.stream(url, headers, null, filename, callback);
 };
