@@ -14,7 +14,7 @@ if (process.argv.length <= 2) {
 var ownerId = process.argv[2];
 var rs = null;
 var roomContact = null;
-var dpath = './log/' + ownerId;
+var dpath = './log/' + ownerId + '-' + (new Date()).getTime();
 var logger = require('./logger')(dpath + '/log.json');
 
 var isRoomContact = function(e) {
@@ -236,13 +236,13 @@ client.onQR(function(imgUrl) {
   });
 }).onNewContact(function(contact) {
   return welcomeNewcomer(client, contact.UserName);
-}).onFMessage(function(msg, callback) {
+}).onFMessage(function(from, msg, callback) {
   return onStrangerInviting(client, msg, callback);
-}).onSysMessage(function(msg, callback) {
+}).onSysMessage(function(from, msg, callback) {
   var from = msg.FromUserName;
   var content = msg.Content;
   return processSysMsg(client, from, content, callback);
-}).onMessage(function(msg, callback) {
+}).onTextMessage(function(from, msg, callback) {
   var cmd = msg.Content;
   if (cmd.length == 19) {
     return joinQun(client, cmd, msg.FromUserName, callback);
