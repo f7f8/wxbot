@@ -1,6 +1,7 @@
 'use strict';
 
 var request = require('request');
+var fs = require('fs');
 var jar = request.jar()
 
 var htmlDecode = function(e) {
@@ -84,5 +85,44 @@ exports.post = function(url, headers, qs, body, callback) {
 
     return callback(null, body);
   });
+};
+
+exports.stream = function(url, headers, qs, filename, callback) {
+  var options = {
+    uri: url,
+    method: 'GET',
+    headers: {
+      'Connection': 'keep-alive',
+      'Pragma': 'no-cache',
+      'Cache-Control': 'no-cache',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.86 Safari/537.36',
+      'Accept-Language': 'zh-CN,zh;q=0.8,en;q=0.6,zh-TW;q=0.4'
+    },
+    jar: jar,
+    timeout: 35e3
+  };
+
+  if (qs) {
+    options.useQuerystring = true;
+    options.qs = qs;
+  }
+
+  if (headers) {
+    for (var k in headers) {
+      options.headers[k] = headers[k];
+    }
+  }
+  
+  request(options)
+  .on('error', function(err) {
+    return callback(err);
+  })
+  .pipe(fs.createWriteStream(filename))
+  .on('error', function(err) {
+    return callback(err);
+  });
+
+  return callback();
 };
 
