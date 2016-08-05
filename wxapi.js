@@ -690,6 +690,8 @@ webwx.prototype.processMsg = function(msg, callback) {
       } else if (msg.MsgType == MT.MSGTYPE_MICROVIDEO) {
         if (self.cbMicroVideoMessage) return self.cbMicroVideoMessage(from, msg, callback);
         return callback();
+      } else {
+        return callback();
       }
     }], function(err) {
       return callback(err);
