@@ -484,10 +484,6 @@ webwx.prototype.preload = function(callback) {
     function(callback) {
       logger.info('更新最近互动联系人资料...');
       return self.updateContactList(self.context.ChatSet, callback);
-    },
-    function(result, callback) {
-      logger.info('更新特殊联系人资料...');
-      return self.updateContactList(['fmessage'], callback);
     }
   ], function(err, qrcode) {
     if (err) return callback(err);
@@ -629,54 +625,75 @@ webwx.prototype.onStatusNotifySync = function(from, msg, callback) {
 };
 
 webwx.prototype.processMsg = function(msg, callback) {
-  var from = this.contacts[msg.FromUserName];
-  if (!from && this.context.User.UserName == msg.FromUserName) {
-    from = this.context.User;
-  }
+  var self = this;
+  async.waterfall([
+    function(callback) {
+      var from = self.contacts[msg.FromUserName];
+      if (!from && self.context.User.UserName == msg.FromUserName) {
+        from = self.context.User;
+      }
 
-  if (!from) {
-    var errMsg = JSON.stringify(msg, null, 2);
-    logger.error(errMsg);
-    return callback(
-      new Error('在联系人列表中找不到消息发送者，原始消息如下：\n' + errMsg)
-    );
-  }
+      if (from) return callback(null, from);
 
-  logger.debug('---------------------------------------------------');
-  logger.debug('> [' + msg.MsgType + '] ' + from.UserName + ' (' + from.NickName + ')');
-  logger.debug('> ' + httper.htmlDecode(msg.Content));
-  logger.debug('---------------------------------------------------');
-  logger.debug('');
+      logger.warn('消息发送者[' + msg.FromUserName + ']暂时不在联系人列表中，开始更新联系人资料...');
 
-  if (msg.FromUserName == 'fmessage') {
-    if (this.cbFMessage) return this.cbFMessage(from, msg, callback);
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_SYS) {
-    if (this.cbSysMessage) return this.cbSysMessage(from, msg, callback);
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_STATUSNOTIFY) {
-    if (msg.StatusNotifyCode == MT.StatusNotifyCode_SYNC_CONV) {
-      return this.onStatusNotifySync(from, msg, callback);
-    }
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_TEXT) {
-    if (this.cbTextMessage) return this.cbTextMessage(from, msg, callback);
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_IMAGE) {
-    if (this.cbImgMessage) return this.cbImgMessage(from, msg, callback);
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_VOICE) {
-    if (this.cbVoiceMessage) return this.cbVoiceMessage(from, msg, callback);
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_VIDEO) {
-    if (this.cbVideoMessage) return this.cbVideoMessage(from, msg, callback);
-    return callback();
-  } else if (msg.MsgType == MT.MSGTYPE_MICROVIDEO) {
-    if (this.cbMicroVideoMessage) return this.cbMicroVideoMessage(from, msg, callback);
-    return callback();
-  }
+      self.updateContactList([msg.FromUserName], function(err) {
+        if (err) {
+          return callback(
+            new Error('在联系人列表中找不到消息发送者，原始消息如下：\n' + err)
+          );
+        }
 
-  return callback();
+        from = self.contacts[msg.FromUserName];
+        logger.warn('消息发送者[' + from.NickName + ']已经找到！');
+        return callback(null, from);
+      });
+    },
+    function(from, callback) {
+      if (!from) {
+        var errMsg = JSON.stringify(msg, null, 2);
+        logger.error(errMsg);
+        return callback(
+          new Error('在联系人列表中找不到消息发送者，原始消息如下：\n' + errMsg)
+        );
+      }
+
+      logger.debug('---------------------------------------------------');
+      logger.debug('> [' + msg.MsgType + '] ' + from.UserName + ' (' + from.NickName + ')');
+      logger.debug('> ' + httper.htmlDecode(msg.Content));
+      logger.debug('---------------------------------------------------');
+      logger.debug('');
+
+      if (msg.FromUserName == 'fmessage') {
+        if (self.cbFMessage) return self.cbFMessage(from, msg, callback);
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_SYS) {
+        if (self.cbSysMessage) return self.cbSysMessage(from, msg, callback);
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_STATUSNOTIFY) {
+        if (msg.StatusNotifyCode == MT.StatusNotifyCode_SYNC_CONV) {
+          return self.onStatusNotifySync(from, msg, callback);
+        }
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_TEXT) {
+        if (self.cbTextMessage) return self.cbTextMessage(from, msg, callback);
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_IMAGE) {
+        if (self.cbImgMessage) return self.cbImgMessage(from, msg, callback);
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_VOICE) {
+        if (self.cbVoiceMessage) return self.cbVoiceMessage(from, msg, callback);
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_VIDEO) {
+        if (self.cbVideoMessage) return self.cbVideoMessage(from, msg, callback);
+        return callback();
+      } else if (msg.MsgType == MT.MSGTYPE_MICROVIDEO) {
+        if (self.cbMicroVideoMessage) return self.cbMicroVideoMessage(from, msg, callback);
+        return callback();
+      }
+    }], function(err) {
+      return callback(err);
+    });
 };
 
 var aiUpdate = function(self, incoming, callback) {
