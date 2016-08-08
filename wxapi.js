@@ -1,5 +1,6 @@
 'use strict';
 
+var util = require('util');
 var request = require('request');
 var parser = require('xml2json');
 var fs = require('fs');
@@ -52,6 +53,15 @@ const MT = {
   StatusNotifyCode_INITED: 3,
   StatusNotifyCode_SYNC_CONV: 4
 };
+
+var WXAPIError = function (msg, inner) {
+  Error.captureStackTrace(this, WXAPIError);
+  this.message = msg || 'Error';
+  
+  inner && (this.message += '内部错误如下：\n' + inner.message);
+}
+util.inherits(WXAPIError, Error);
+WXAPIError.prototype.name = 'WXAPI Error';
 
 function webwx(entry) {
   this.entry = entry;
@@ -239,6 +249,10 @@ webwx.prototype.updateContactList = function(idList, callback) {
   var url = this.wxUrl(null, WXAPI_BATCH_GET_CONTACT );
   batchGetContact(url, this.context, idList, 'ex', function(err, result) {
     if (err) return callback(err);
+    
+    if (!result || !result.ContactList) {
+      return callback(new WXAPIError('无法从接口[' + WXAPI_BATCH_GET_CONTACT + ']返回中检索到联系人信息！'));
+    }
 
     var list = result.ContactList;
     for (var i in list) {
@@ -258,7 +272,7 @@ webwx.prototype.updateContactList = function(idList, callback) {
 
 var getAppJsUrl = function(entryUrl, callback) {
   httper.get(entryUrl, null, null, function(err, data) {
-    if (err) return callback(err);
+    if (err) return callback(new WXAPIError('获取核心JS模块地址过程中发生访问异常。', err));
 
     var appUrl = null;
     var re = /(https:\/\/res.wx.qq.com\/zh_CN\/htmledition\/v2\/js\/webwx.*\.js)/;
@@ -267,7 +281,7 @@ var getAppJsUrl = function(entryUrl, callback) {
 
     if (!appUrl) {
       return callback(
-        new Error('无法从返回页代码中解析出核心js模块地址！')
+        new WXAPIError('无法从页面解析出核心js模块地址，页面内容如下：\n' + data)
       );
     }
 
@@ -277,10 +291,19 @@ var getAppJsUrl = function(entryUrl, callback) {
 
 var getAppId = function(url, callback) {
   httper.get(url, null, null, function(err, data) {
-    if (err) return callback(err);
+    if (err) return callback(new WXAPIError('获取AppId过程中发生访问异常。', err));
 
+    var appId = null;
     var re = /jslogin\?appid\=(wx[0-9a-z]+)\&/;
-    var appId = data.match(re)[1];
+    var matches = data.match(re);
+    matches && matches.length > 1 && (appId = matches[1]);
+
+    if (!appId) {
+      return callback(
+        new WXAPIError('无法从js模块中解析出appid，模块内容如下：\n' + data)
+      );
+    }
+
     return callback(null, appId);
   });
 };
@@ -628,26 +651,28 @@ webwx.prototype.processMsg = function(msg, callback) {
   var self = this;
   async.waterfall([
     function(callback) {
-      var from = self.contacts[msg.FromUserName];
-      if (!from && self.context.User.UserName == msg.FromUserName) {
-        from = self.context.User;
-      }
-
-      if (from) return callback(null, from);
-
-      logger.warn('消息发送者[' + msg.FromUserName + ']暂时不在联系人列表中，开始更新联系人资料...');
-
-      self.updateContactList([msg.FromUserName], function(err) {
-        if (err) {
-          return callback(
-            new Error('在联系人列表中找不到消息发送者，原始消息如下：\n' + err)
-          );
+      async.retry({times: 5, interval: 5000}, function(callback) {
+        var from = self.contacts[msg.FromUserName];
+        if (!from && self.context.User.UserName == msg.FromUserName) {
+          from = self.context.User;
         }
 
-        from = self.contacts[msg.FromUserName];
-        logger.warn('消息发送者[' + from.NickName + ']已经找到！');
-        return callback(null, from);
-      });
+        if (from) return callback(null, from);
+
+        logger.warn('消息发送者[' + msg.FromUserName + ']暂时不在联系人列表中，开始更新联系人资料...');
+
+        self.updateContactList([msg.FromUserName], function(err) {
+          if (err) {
+            return callback(
+              new Error('在联系人列表中找不到消息发送者，原始消息如下：\n' + err)
+            );
+          }
+
+          from = self.contacts[msg.FromUserName];
+          logger.warn('消息发送者[' + from.NickName + ']已经找到！');
+          return callback(null, from);
+        });
+      }, callback);
     },
     function(from, callback) {
       if (!from) {
