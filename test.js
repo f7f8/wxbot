@@ -34,7 +34,7 @@ var downloadQR = function(url, filename) {
   });
 };
 
-const ENTRY_URL = 'https://web.weixin.qq.com/';
+const ENTRY_URL = 'https://wx.qq.com/';
 var client = new webwx(ENTRY_URL);
 
 client.enableLog('./log/test');
@@ -44,11 +44,12 @@ client.onQR(function(imgUrl, callback) {
   return downloadQR(imgUrl, 'qrs/qr.jpg', callback);
 }).onPreloaded(function() {
   logger.debug('共发现联系人: ' + client.contacts.length + ' 个');
-}).onMessage(function(msgs, callback) {
+}).onTextMessage(function(from, msg, callback) {
   return callback();
 }).start(function(err, result) {
   if (err) {
-    return logger.error(err);
+    logger.error(err);
+    return process.exit(-1002);
   }
 
   return logger.info(result);

@@ -4,7 +4,7 @@ var async = require('async')
 var webwx = require('./wxapi');
 var yunmof = require('./yunmof');
 
-const ENTRY_URL = 'https://web.weixin.qq.com/';
+const ENTRY_URL = 'https://wx.qq.com/';
 
 if (process.argv.length <= 2) {
   console.log("用法: node qun.js [群主云魔方ID]");
